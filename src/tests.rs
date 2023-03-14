@@ -13,7 +13,7 @@ mod tests {
 
     #[test]
     fn test() {
-        let mut blockchain = StateMachine::new();
+        let mut blockchain = StateMachine::default();
         let mut csprng = rand::thread_rng();
         let keypair: Keypair = Keypair::generate(&mut csprng);
         let address: Address = keypair.public.into();
@@ -22,7 +22,7 @@ mod tests {
             vout: 2,
         };
         let deposits = {
-            let deposit_output = DepositOutput {
+            let deposit_output = Output::Regular {
                 address,
                 value: 100,
             };
@@ -31,26 +31,30 @@ mod tests {
         blockchain.add_deposits(deposits);
         dbg!(&blockchain.outputs);
 
-        let output = Output { address, value: 1 };
-        let change = Output { address, value: 98 };
+        let output = Output::Regular { address, value: 1 };
+        let change = Output::Regular { address, value: 98 };
         let transaction = Transaction::new(
             vec![OutPoint::Deposit(deposit_outpoint)],
             vec![output, change],
-            vec![],
         );
-        let coinbase = Output {
+        let authorization = Authorization::new(&keypair, &transaction);
+        let transaction = Transaction {
+            authorizations: vec![authorization],
+            ..transaction
+        };
+        let coinbase = Output::Regular {
             address,
             value: blockchain.get_fee(&transaction),
         };
+        dbg!(&transaction);
+        blockchain.validate_transaction(&transaction).unwrap();
         let body = Body::new(vec![transaction], vec![coinbase]);
         let header = Header::new(&Hash::default().into(), &body);
-        dbg!(blockchain.validate_block(&header, &body));
 
         dbg!(&blockchain.unspent_outpoints);
-        dbg!(blockchain.connect_block(&header, &body));
+        blockchain.connect_block(&header, &body);
+        dbg!(&blockchain.outputs);
         dbg!(&blockchain.unspent_outpoints);
-
-        dbg!(&header, &body);
     }
 
     #[quickcheck]

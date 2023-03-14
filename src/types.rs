@@ -1,6 +1,5 @@
-use ed25519_dalek::{Keypair, Signer, Verifier};
+use ed25519_dalek::{Signer, Verifier};
 use sha2::Digest;
-use std::collections::HashMap;
 
 pub const THIS_SIDECHAIN: usize = 0;
 
@@ -133,17 +132,17 @@ impl std::str::FromStr for Address {
 pub enum OutPoint {
     Regular { txid: Txid, vout: u32 },
     Coinbase { block_hash: BlockHash, vout: u32 },
-    Withdrawal { txid: Txid, vout: u32 },
+    // These exist on mainchain.
     Deposit(bitcoin::OutPoint),
 }
 
 #[derive(PartialEq, Eq, Debug, Clone, serde::Serialize, serde::Deserialize)]
-pub struct Signature {
+pub struct Authorization {
     public_key: ed25519_dalek::PublicKey,
     signature: ed25519_dalek::Signature,
 }
 
-impl Signature {
+impl Authorization {
     pub fn new(keypair: &ed25519_dalek::Keypair, transaction: &Transaction) -> Self {
         let hash: Hash = transaction.txid().into();
         Self {
@@ -151,8 +150,8 @@ impl Signature {
             public_key: keypair.public,
         }
     }
-    pub fn is_valid(&self, txid_without_signatures: Txid) -> bool {
-        let hash: Hash = txid_without_signatures.into();
+    pub fn is_valid(&self, txid_without_authorizations: Txid) -> bool {
+        let hash: Hash = txid_without_authorizations.into();
         self.public_key.verify(&hash, &self.signature).is_ok()
     }
     pub fn get_address(&self) -> Address {
@@ -161,106 +160,53 @@ impl Signature {
 }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
-pub struct DepositOutput {
-    pub address: Address,
-    pub value: u64,
-}
-
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
-pub struct Output {
-    pub address: Address,
-    pub value: u64,
+pub enum Output {
+    Regular {
+        address: Address,
+        value: u64,
+    },
+    Withdrawal {
+        value: u64,
+        main_fee: u64,
+        side_address: Address,
+        main_address: bitcoin::Address,
+    },
 }
 
 impl Output {
-    pub fn validate(
-        inputs: &[Self],
-        deposit_inputs: &[DepositOutput],
-        withdrawal_inputs: &[WithdrawalOutput],
-        outputs: &[Self],
-        withdrawal_outputs: &[WithdrawalOutput],
-    ) -> bool {
-        let regular_in: u64 = inputs.iter().map(|i| i.value).sum();
-        let deposit_in: u64 = deposit_inputs.iter().map(|i| i.value).sum();
-        let refund_in: u64 = withdrawal_inputs.iter().map(|i| i.value).sum();
-
-        let regular_out: u64 = outputs.iter().map(|o| o.value).sum();
-        let withdrawal_out: u64 = withdrawal_outputs.iter().map(|o| o.value).sum();
-        regular_out + withdrawal_out > regular_in + deposit_in + refund_in
-    }
-    pub fn get_fee(
-        inputs: &[Self],
-        deposit_inputs: &[DepositOutput],
-        withdrawal_inputs: &[WithdrawalOutput],
-        outputs: &[Self],
-        withdrawal_outputs: &[WithdrawalOutput],
-    ) -> u64 {
-        let regular_in: u64 = inputs.iter().map(|i| i.value).sum();
-        let deposit_in: u64 = deposit_inputs.iter().map(|i| i.value).sum();
-        let withdrawal_in: u64 = withdrawal_inputs.iter().map(|i| i.value).sum();
-
-        let regular_out: u64 = outputs.iter().map(|o| o.value).sum();
-        let withdrawal_out: u64 = withdrawal_outputs.iter().map(|wo| wo.value).sum();
-        (regular_in + deposit_in + withdrawal_in) - (regular_out + withdrawal_out)
-    }
     pub fn get_address(&self) -> Address {
-        self.address
+        match self {
+            Output::Regular { address, .. } => *address,
+            Output::Withdrawal { side_address, .. } => *side_address,
+        }
     }
-}
-
-impl Ord for Output {
-    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
-        self.value.cmp(&other.value)
+    pub fn get_value(&self) -> u64 {
+        match self {
+            Output::Regular { value, .. } => *value,
+            Output::Withdrawal { value, .. } => *value,
+        }
     }
-}
-
-impl PartialOrd for Output {
-    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
-        self.value.partial_cmp(&other.value)
-    }
-}
-
-impl PartialEq for Output {
-    fn eq(&self, other: &Self) -> bool {
-        self.value == other.value
-    }
-}
-
-impl Eq for Output {}
-
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
-pub struct WithdrawalOutput {
-    pub value: u64,
-    pub fee: u64,
-    pub side_address: Address,
-    pub main_address: bitcoin::Address,
 }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct Transaction {
     pub inputs: Vec<OutPoint>,
-    pub signatures: Vec<Signature>,
+    pub authorizations: Vec<Authorization>,
     pub outputs: Vec<Output>,
-    pub withdrawal_outputs: Vec<WithdrawalOutput>,
 }
 
 impl Transaction {
-    pub fn new(
-        inputs: Vec<OutPoint>,
-        outputs: Vec<Output>,
-        withdrawal_outputs: Vec<WithdrawalOutput>,
-    ) -> Self {
+    pub fn new(inputs: Vec<OutPoint>, outputs: Vec<Output>) -> Self {
         Self {
             inputs,
             outputs,
-            withdrawal_outputs,
-            signatures: vec![],
+            authorizations: vec![],
         }
     }
 
-    pub fn without_signatures(&self) -> Transaction {
+    pub fn without_authorizations(&self) -> Transaction {
         Transaction {
-            signatures: vec![],
+            authorizations: vec![],
             ..self.clone()
         }
     }
