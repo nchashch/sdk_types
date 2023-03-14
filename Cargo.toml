@@ -1,0 +1,22 @@
+[package]
+name = "dalek_state_machine"
+version = "0.1.0"
+edition = "2021"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+bincode = "1.3.3"
+bitcoin = { version = "0.29.2", features = ["serde"] }
+bs58 = { version = "0.4.0", features = ["check"] }
+ed25519-dalek = { version = "1.0.1", features = ["serde"] }
+hex = "0.4.3"
+rand = "0.7"
+serde = { version = "1.0.152", features = ["derive"] }
+sha2 = "0.10.6"
+sha256 = "1.1.2"
+
+[dev-dependencies]
+fake = "2.5.0"
+quickcheck = "1.0.3"
+quickcheck_macros = "1.0.0"
