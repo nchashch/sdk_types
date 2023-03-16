@@ -1,6 +1,8 @@
+use crate::traits::{OutputStore, UtxoSet};
 use bitcoin::hashes::Hash as _;
 use ed25519_dalek::{Signer, Verifier};
 use sha2::Digest;
+use std::collections::HashMap;
 
 pub const THIS_SIDECHAIN: usize = 0;
 
@@ -132,7 +134,7 @@ impl std::str::FromStr for Address {
 #[derive(Debug, Clone, Copy, Eq, PartialEq, Hash, serde::Serialize, serde::Deserialize)]
 pub enum OutPoint {
     Regular { txid: Txid, vout: u32 },
-    Coinbase { block_hash: BlockHash, vout: u32 },
+    Coinbase { merkle_root: MerkleRoot, vout: u32 },
     // These exist on mainchain.
     Deposit(bitcoin::OutPoint),
 }
@@ -203,6 +205,23 @@ pub struct Transaction {
 }
 
 impl Transaction {
+    pub fn get_inputs<O: OutputStore<OutPoint, Output>>(&self, store: &O) -> Option<Vec<Output>> {
+        self.inputs
+            .iter()
+            .map(|outpoint| store.get_output(outpoint).cloned())
+            .collect()
+    }
+
+    pub fn get_fee<O: OutputStore<OutPoint, Output>>(&self, store: &O) -> Option<u64> {
+        let inputs = match self.get_inputs(store) {
+            Some(inputs) => inputs,
+            None => return None,
+        };
+        let value_in: u64 = inputs.iter().map(|i| i.get_value()).sum();
+        let value_out: u64 = self.outputs.iter().map(|o| o.get_value()).sum();
+        Some(value_in - value_out)
+    }
+
     pub fn new(inputs: Vec<OutPoint>, outputs: Vec<Output>) -> Self {
         Self {
             inputs,
@@ -220,6 +239,45 @@ impl Transaction {
 
     pub fn txid(&self) -> Txid {
         hash(self).into()
+    }
+
+    pub fn validate<U: UtxoSet<OutPoint>, O: OutputStore<OutPoint, Output>>(
+        &self,
+        utxo_set: &U,
+        outputs: &O,
+    ) -> Result<(), String> {
+        let (value_in, value_out) = {
+            let inputs = match self.get_inputs(outputs) {
+                Some(inputs) => inputs,
+                None => return Err("can not get transaction inputs".into()),
+            };
+            let value_in: u64 = inputs.iter().map(|i| i.get_value()).sum();
+            let value_out: u64 = self.outputs.iter().map(|o| o.get_value()).sum();
+            (value_in, value_out)
+        };
+        if value_in < value_out {
+            return Err("value in < value out".into());
+        }
+        let txid_without_authorizations = self.without_authorizations().txid();
+        if self.inputs.len() != self.authorizations.len() {
+            return Err("not enough authorizations".into());
+        }
+        for (outpoint, authorization) in self.inputs.iter().zip(self.authorizations.iter()) {
+            if utxo_set.is_spent(outpoint) {
+                return Err("output is double spent".into());
+            }
+            if !authorization.is_valid(txid_without_authorizations) {
+                return Err("invalid authorization".into());
+            }
+            if let Some(spent_output) = outputs.get_output(outpoint) {
+                if spent_output.get_address() != authorization.get_address() {
+                    return Err("addresses don't match".into());
+                }
+            } else {
+                return Err("output doesn't exist".into());
+            }
+        }
+        Ok(())
     }
 }
 
@@ -272,8 +330,60 @@ impl Body {
 
     pub fn compute_merkle_root(&self) -> MerkleRoot {
         // FIXME: Compute actual merkle root instead of just a hash.
-        let serialized_transactions = bincode::serialize(&self.transactions).unwrap();
-        hash(&serialized_transactions).into()
+        hash(&(&self.coinbase, &self.transactions)).into()
+    }
+
+    pub fn get_inputs(&self) -> Vec<OutPoint> {
+        self.transactions
+            .iter()
+            .flat_map(|tx| tx.inputs.iter())
+            .copied()
+            .collect()
+    }
+
+    pub fn get_created_outpoints(&self) -> Vec<OutPoint> {
+        self.get_outputs().keys().copied().collect()
+    }
+
+    pub fn get_outputs(&self) -> HashMap<OutPoint, Output> {
+        let mut outputs = HashMap::new();
+        let merkle_root = self.compute_merkle_root();
+        for (vout, output) in self.coinbase.iter().enumerate() {
+            let vout = vout as u32;
+            let outpoint = OutPoint::Coinbase { merkle_root, vout };
+            outputs.insert(outpoint, output.clone());
+        }
+        for transaction in &self.transactions {
+            let txid = transaction.txid();
+            for (vout, output) in transaction.outputs.iter().enumerate() {
+                let vout = vout as u32;
+                let outpoint = OutPoint::Regular { txid, vout };
+                outputs.insert(outpoint, output.clone());
+            }
+        }
+        outputs
+    }
+
+    pub fn validate<U: UtxoSet<OutPoint>, O: OutputStore<OutPoint, Output>>(
+        &self,
+        utxo_set: &U,
+        outputs: &O,
+    ) -> bool {
+        for tx in &self.transactions {
+            if tx.validate(utxo_set, outputs).is_err() {
+                return false;
+            }
+        }
+        let fees: Option<u64> = self.transactions.iter().map(|tx| tx.get_fee(outputs)).sum();
+        let fees = match fees {
+            Some(fees) => fees,
+            None => return false,
+        };
+        let coinbase_value: u64 = self.coinbase.iter().map(|output| output.get_value()).sum();
+        if coinbase_value > fees {
+            return false;
+        }
+        true
     }
 }
 

@@ -1,6 +1,7 @@
 mod tests;
+mod traits;
 mod types;
-mod state_machine;
 
-pub use types::*;
-pub use state_machine::*;
+use std::collections::{HashMap, HashSet};
+use traits::*;
+use types::*;

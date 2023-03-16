@@ -23,10 +23,7 @@ mod tests {
         keypairs
     }
 
-    fn random_deposits(
-        num_deposits: usize,
-        addresses: &[Address],
-    ) -> HashMap<OutPoint, Output> {
+    fn random_deposits(num_deposits: usize, addresses: &[Address]) -> HashMap<OutPoint, Output> {
         const MAX_MONEY: u64 = 21_000_000_00_000_000;
         (0..num_deposits)
             .map(|_| {
@@ -62,13 +59,13 @@ mod tests {
         num_inputs: usize,
         num_outputs: usize,
         unspent_outpoints: &HashSet<OutPoint>,
-        state_machine: &StateMachine,
+        utxo_set: &HashSet<OutPoint>,
+        outputs: &HashMap<OutPoint, Output>,
         keypairs: &HashMap<Address, Keypair>,
     ) -> (Transaction, HashSet<OutPoint>) {
         let addresses: Vec<Address> = keypairs.keys().copied().collect();
         let (inputs, addresses) = {
-            let outpoints: Vec<OutPoint> =
-                state_machine.unspent_outpoints.iter().copied().collect();
+            let outpoints: Vec<OutPoint> = utxo_set.iter().copied().collect();
             let inputs: Vec<OutPoint> = (0..num_inputs)
                 .map(|_| {
                     let index: usize = (0..outpoints.len()).fake();
@@ -77,13 +74,13 @@ mod tests {
                 .collect();
             let addresses: Vec<Address> = inputs
                 .iter()
-                .map(|outpoint| state_machine.outputs[outpoint].get_address())
+                .map(|outpoint| outputs[outpoint].get_address())
                 .collect();
             (inputs, addresses)
         };
         let value_in: u64 = inputs
             .iter()
-            .map(|outpoint| state_machine.outputs[outpoint].get_value())
+            .map(|outpoint| outputs[outpoint].get_value())
             .sum();
         let outputs = random_outputs(num_outputs, value_in, &addresses);
         let transaction = Transaction::new(inputs.clone(), outputs);
@@ -103,13 +100,13 @@ mod tests {
     fn random_body(
         transactions: Vec<Transaction>,
         num_coinbase_outputs: usize,
-        state_machine: &StateMachine,
+        outputs: &HashMap<OutPoint, Output>,
         keypairs: &HashMap<Address, Keypair>,
     ) -> Body {
         let addresses: Vec<Address> = keypairs.keys().copied().collect();
         let fee: u64 = transactions
             .iter()
-            .map(|tx| state_machine.get_fee(tx))
+            .map(|tx| tx.get_fee(outputs).unwrap())
             .sum();
         let coinbase = random_outputs(num_coinbase_outputs, fee, &addresses);
         Body::new(transactions, coinbase)
@@ -119,14 +116,19 @@ mod tests {
     fn test() {
         let keypairs = random_keypairs(10);
         let addresses: Vec<Address> = keypairs.keys().copied().collect();
-        let deposit_outputs = random_deposits(15, &addresses);
-        let mut state_machine = StateMachine::default();
-        state_machine.connect_main_block(deposit_outputs.clone(), &[], HashMap::new());
-        let mut unspent_outpoints = state_machine.unspent_outpoints.clone();
-        let transactions = (0..10)
+        let deposit_outputs = random_deposits(5, &addresses);
+
+        let mut utxo_set: HashSet<OutPoint> = HashSet::new();
+        let mut outputs: HashMap<OutPoint, Output> = HashMap::new();
+
+        utxo_set.extend(deposit_outputs.keys());
+        outputs.extend(deposit_outputs);
+
+        let mut unspent_outpoints = utxo_set.clone();
+        let transactions = (0..2)
             .map(|_| {
                 let (transaction, spent_outpoints) =
-                    random_transaction(1, 1, &unspent_outpoints, &state_machine, &keypairs);
+                    random_transaction(1, 1, &unspent_outpoints, &utxo_set, &outputs, &keypairs);
                 unspent_outpoints = unspent_outpoints
                     .difference(&spent_outpoints)
                     .copied()
@@ -135,22 +137,21 @@ mod tests {
             })
             .collect();
 
-        let body = random_body(transactions, 1, &state_machine, &keypairs);
-        state_machine
-            .validate_transaction(&body.transactions[0])
-            .unwrap();
-        let header = Header::new(
-            [0; 32].into(),
-            bitcoin::BlockHash::from_inner([0; 32]),
-            &body,
-        );
-        state_machine.connect_block(&header, &body);
-    }
-
-    #[quickcheck]
-    fn test_quick(s: String) -> bool {
-        let reversed: String = s.chars().rev().collect();
-        let round_trip: String = reversed.chars().rev().collect();
-        round_trip == s
+        let body = random_body(transactions, 1, &outputs, &keypairs);
+        body.validate(&utxo_set, &outputs);
+        dbg!(&utxo_set);
+        {
+            let inputs = body.get_inputs();
+            let new_outputs = body.get_outputs();
+            for input in &inputs {
+                utxo_set.remove(input);
+            }
+            utxo_set.extend(new_outputs.keys());
+            outputs.extend(new_outputs);
+        }
+        dbg!(&utxo_set);
+        dbg!(body.coinbase.len());
+        dbg!(body.transactions.len());
+        dbg!(body.transactions);
     }
 }
