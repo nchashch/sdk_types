@@ -1,3 +1,4 @@
+use bitcoin::hashes::Hash as _;
 use ed25519_dalek::{Signer, Verifier};
 use sha2::Digest;
 
@@ -49,7 +50,7 @@ impl std::fmt::Debug for MerkleRoot {
 }
 
 #[derive(Clone, Copy, Eq, PartialEq, Hash, serde::Serialize, serde::Deserialize)]
-pub struct Txid(Hash);
+pub struct Txid(pub Hash);
 
 impl From<Hash> for Txid {
     fn from(other: Hash) -> Self {
@@ -76,7 +77,7 @@ impl std::fmt::Debug for Txid {
 }
 
 #[derive(Clone, Copy, Eq, PartialEq, Hash, serde::Serialize, serde::Deserialize)]
-pub struct Address(Hash);
+pub struct Address(pub Hash);
 
 impl Address {
     pub fn to_string(&self) -> String {
@@ -174,6 +175,12 @@ pub enum Output {
 }
 
 impl Output {
+    pub fn is_withdrawal(&self) -> bool {
+        match self {
+            Self::Withdrawal { .. } => true,
+            _ => false,
+        }
+    }
     pub fn get_address(&self) -> Address {
         match self {
             Output::Regular { address, .. } => *address,
@@ -216,16 +223,30 @@ impl Transaction {
     }
 }
 
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Copy, Clone, serde::Serialize, serde::Deserialize)]
 pub struct Header {
-    pub prev_block_hash: BlockHash,
+    pub prev_side_block_hash: BlockHash,
+    pub prev_main_block_hash: bitcoin::BlockHash,
     pub merkle_root: MerkleRoot,
 }
 
 impl Header {
-    pub fn new(prev_block_hash: &BlockHash, body: &Body) -> Self {
+    pub fn zero() -> Self {
         Self {
-            prev_block_hash: *prev_block_hash,
+            prev_side_block_hash: [0; 32].into(),
+            prev_main_block_hash: bitcoin::BlockHash::from_inner([0; 32]),
+            merkle_root: [0; 32].into(),
+        }
+    }
+
+    pub fn new(
+        prev_side_block_hash: BlockHash,
+        prev_main_block_hash: bitcoin::BlockHash,
+        body: &Body,
+    ) -> Self {
+        Self {
+            prev_side_block_hash,
+            prev_main_block_hash,
             merkle_root: body.compute_merkle_root(),
         }
     }

@@ -14,14 +14,60 @@ impl StateMachine {
         !self.unspent_outpoints.contains(outpoint)
     }
 
-    pub fn add_deposits(&mut self, deposit_outputs: HashMap<bitcoin::OutPoint, Output>) {
-        let deposit_outputs: HashMap<OutPoint, Output> = deposit_outputs
-            .into_iter()
-            .map(|(outpoint, output)| (OutPoint::Deposit(outpoint), output))
-            .collect();
-        self.unspent_outpoints
-            .extend(deposit_outputs.keys().cloned());
+    pub fn get_unspent_withdrawals(&self) -> HashMap<OutPoint, sdk::WithdrawalOutput> {
+        let mut withdrawals = HashMap::new();
+        for outpoint in &self.unspent_outpoints {
+            let output = self.outputs[outpoint].clone();
+            let withdrawal = match output {
+                Output::Withdrawal {
+                    main_address,
+                    main_fee,
+                    value,
+                    ..
+                } => sdk::WithdrawalOutput {
+                    address: main_address,
+                    fee: main_fee,
+                    value,
+                },
+                _ => continue,
+            };
+            withdrawals.insert(*outpoint, withdrawal);
+        }
+        withdrawals
+    }
+
+    pub fn connect_main_block(
+        &mut self,
+        deposit_outputs: HashMap<OutPoint, Output>,
+        locked_withdrawal_outpoints: &[OutPoint],
+        unlocked_withdrawal_outputs: HashMap<OutPoint, Output>,
+    ) {
+        self.unspent_outpoints.extend(deposit_outputs.keys());
         self.outputs.extend(deposit_outputs);
+        for outpoint in locked_withdrawal_outpoints {
+            self.unspent_outpoints.remove(outpoint);
+        }
+        self.unspent_outpoints
+            .extend(unlocked_withdrawal_outputs.keys());
+        self.outputs.extend(unlocked_withdrawal_outputs);
+    }
+
+    pub fn disconnect_main_block(
+        &mut self,
+        deposit_outpoints: &[OutPoint],
+        locked_withdrawal_outputs: HashMap<OutPoint, Output>,
+        unlocked_withdrawal_outpoints: &[OutPoint],
+    ) {
+        for outpoint in deposit_outpoints {
+            self.unspent_outpoints.remove(outpoint);
+            self.outputs.remove(outpoint);
+        }
+        self.unspent_outpoints
+            .extend(locked_withdrawal_outputs.keys());
+        for outpoint in unlocked_withdrawal_outpoints {
+            self.unspent_outpoints.remove(outpoint);
+        }
+        self.outputs.extend(locked_withdrawal_outputs);
     }
 
     pub fn validate_transaction(&self, transaction: &Transaction) -> Result<(), String> {
@@ -64,7 +110,7 @@ impl StateMachine {
         let best_block = self
             .get_best_block_hash()
             .unwrap_or_else(|| Hash::default().into());
-        if header.prev_block_hash != best_block {
+        if header.prev_side_block_hash != best_block {
             return false;
         }
         if header.merkle_root != body.compute_merkle_root() {
@@ -145,7 +191,7 @@ impl StateMachine {
             .collect()
     }
 
-    fn get_inputs(&self, transaction: &Transaction) -> Vec<Output> {
+    pub fn get_inputs(&self, transaction: &Transaction) -> Vec<Output> {
         transaction
             .inputs
             .iter()
