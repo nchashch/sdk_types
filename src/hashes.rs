@@ -1,7 +1,7 @@
-use sha2::Digest;
+use blake2::Digest;
 
-const SHA256_LENGTH: usize = 32;
-pub type Hash = [u8; SHA256_LENGTH];
+const BLAKE2_LENGTH: usize = 32;
+pub type Hash = [u8; BLAKE2_LENGTH];
 
 #[derive(Clone, Copy, Eq, PartialEq, Hash, serde::Serialize, serde::Deserialize)]
 pub struct BlockHash(Hash);
@@ -91,7 +91,7 @@ impl std::fmt::Debug for Txid {
 }
 
 pub fn hash<T: serde::Serialize>(data: &T) -> Hash {
-    let mut hasher = sha2::Sha256::new();
+    let mut hasher = blake2::Blake2b::<digest::consts::U32>::new();
     let data_serialized =
         bincode::serialize(data).expect("failed to serialize a type to compute a hash");
     hasher.update(data_serialized);
