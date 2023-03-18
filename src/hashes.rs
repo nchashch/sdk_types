@@ -66,6 +66,12 @@ impl From<Txid> for Hash {
     }
 }
 
+impl<'a> From<&'a Txid> for &'a Hash {
+    fn from(other: &'a Txid) -> Self {
+        &other.0
+    }
+}
+
 impl std::fmt::Display for Txid {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "{}", hex::encode(self.0))

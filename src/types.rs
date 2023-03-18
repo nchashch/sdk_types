@@ -2,9 +2,10 @@ pub use crate::address::*;
 pub use crate::hashes::*;
 use crate::traits::UtxoMap;
 use ed25519_dalek::{Signer, Verifier};
+use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
-#[derive(Debug, Clone, Copy, Eq, PartialEq, Hash, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, Copy, Eq, PartialEq, Hash, Serialize, Deserialize)]
 pub enum OutPoint {
     Regular { txid: Txid, vout: u32 },
     Coinbase { merkle_root: MerkleRoot, vout: u32 },
@@ -12,35 +13,32 @@ pub enum OutPoint {
     Deposit(bitcoin::OutPoint),
 }
 
-#[derive(PartialEq, Eq, Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[derive(PartialEq, Eq, Debug, Clone, Serialize, Deserialize)]
 pub struct Authorization {
     public_key: ed25519_dalek::PublicKey,
     signature: ed25519_dalek::Signature,
 }
 
 impl Authorization {
-    pub fn new(keypair: &ed25519_dalek::Keypair, transaction: &Transaction) -> Self {
-        let hash: Hash = transaction.txid().into();
+    pub fn new(keypair: &ed25519_dalek::Keypair, txid_without_authorizations: &Txid) -> Self {
+        let hash: &Hash = txid_without_authorizations.into();
         Self {
-            signature: keypair.sign(&hash),
+            signature: keypair.sign(hash),
             public_key: keypair.public,
         }
     }
-    pub fn is_valid(&self, txid_without_authorizations: Txid) -> bool {
-        let hash: Hash = txid_without_authorizations.into();
-        self.public_key.verify(&hash, &self.signature).is_ok()
+    pub fn is_valid(&self, txid_without_authorizations: &Txid) -> bool {
+        let hash: &Hash = txid_without_authorizations.into();
+        self.public_key.verify(hash, &self.signature).is_ok()
     }
     pub fn get_address(&self) -> Address {
         self.public_key.into()
     }
 }
 
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
-pub enum Output {
-    Regular {
-        address: Address,
-        value: u64,
-    },
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub enum Output<R> {
+    Regular(R),
     Withdrawal {
         value: u64,
         main_fee: u64,
@@ -49,7 +47,12 @@ pub enum Output {
     },
 }
 
-impl Output {
+trait CustomOutput {
+    fn get_address(&self) -> Address;
+    fn get_value(&self) -> u64;
+}
+
+impl<R: CustomOutput> Output<R> {
     pub fn is_withdrawal(&self) -> bool {
         match self {
             Self::Withdrawal { .. } => true,
@@ -58,27 +61,27 @@ impl Output {
     }
     pub fn get_address(&self) -> Address {
         match self {
-            Output::Regular { address, .. } => *address,
+            Output::Regular(output) => output.get_address(),
             Output::Withdrawal { side_address, .. } => *side_address,
         }
     }
     pub fn get_value(&self) -> u64 {
         match self {
-            Output::Regular { value, .. } => *value,
+            Output::Regular(output) => output.get_value(),
             Output::Withdrawal { value, .. } => *value,
         }
     }
 }
 
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
-pub struct Transaction {
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Transaction<R> {
     pub inputs: Vec<OutPoint>,
     pub authorizations: Vec<Authorization>,
-    pub outputs: Vec<Output>,
+    pub outputs: Vec<Output<R>>,
 }
 
-impl Transaction {
-    pub fn get_fee<U: UtxoMap<OutPoint, Output>>(&self, utxos: &U) -> Option<u64> {
+impl<R: Clone + CustomOutput + Serialize + for<'de> Deserialize<'de>> Transaction<R> {
+    pub fn get_fee<U: UtxoMap<OutPoint, Output<R>>>(&self, utxos: &U) -> Option<u64> {
         let spent_outputs = match utxos.get_utxos(&self.inputs) {
             Some(spent_outputs) => spent_outputs,
             None => return None,
@@ -88,7 +91,7 @@ impl Transaction {
         Some(value_in - value_out)
     }
 
-    pub fn new(inputs: Vec<OutPoint>, outputs: Vec<Output>) -> Self {
+    pub fn new(inputs: Vec<OutPoint>, outputs: Vec<Output<R>>) -> Self {
         Self {
             inputs,
             outputs,
@@ -96,7 +99,7 @@ impl Transaction {
         }
     }
 
-    pub fn without_authorizations(&self) -> Transaction {
+    pub fn without_authorizations(&self) -> Transaction<R> {
         Transaction {
             authorizations: vec![],
             ..self.clone()
@@ -107,7 +110,7 @@ impl Transaction {
         hash(self).into()
     }
 
-    pub fn validate<U: UtxoMap<OutPoint, Output>>(&self, utxos: &U) -> Result<(), String> {
+    pub fn validate<U: UtxoMap<OutPoint, Output<R>>>(&self, utxos: &U) -> Result<(), String> {
         let spent_outputs = match utxos.get_utxos(&self.inputs) {
             Some(spent_outputs) => spent_outputs,
             None => return Err("can not get transaction inputs".into()),
@@ -131,7 +134,7 @@ impl Transaction {
             if authorization.get_address() != spent_output.get_address() {
                 return Err("authorization address does not match spent output address".into());
             }
-            if !authorization.is_valid(txid_without_authorizations) {
+            if !authorization.is_valid(&txid_without_authorizations) {
                 return Err("invalid authorization".into());
             }
         }
@@ -139,15 +142,15 @@ impl Transaction {
     }
 }
 
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
-pub struct Body {
-    pub coinbase: Vec<Output>,
-    pub transactions: Vec<Transaction>,
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Body<R> {
+    pub coinbase: Vec<Output<R>>,
+    pub transactions: Vec<Transaction<R>>,
 }
 
-impl Body {
-    pub fn new(transactions: Vec<Transaction>, coinbase: Vec<Output>) -> Body {
-        Body {
+impl<R: Clone + CustomOutput + Serialize + for<'de> Deserialize<'de>> Body<R> {
+    pub fn new(transactions: Vec<Transaction<R>>, coinbase: Vec<Output<R>>) -> Self {
+        Self {
             coinbase,
             transactions,
         }
@@ -166,7 +169,7 @@ impl Body {
             .collect()
     }
 
-    pub fn get_outputs(&self) -> HashMap<OutPoint, Output> {
+    pub fn get_outputs(&self) -> HashMap<OutPoint, Output<R>> {
         let mut outputs = HashMap::new();
         let merkle_root = self.compute_merkle_root();
         for (vout, output) in self.coinbase.iter().enumerate() {
@@ -185,7 +188,7 @@ impl Body {
         outputs
     }
 
-    pub fn validate<U: UtxoMap<OutPoint, Output>>(&self, utxos: &U) -> bool {
+    pub fn validate<U: UtxoMap<OutPoint, Output<R>>>(&self, utxos: &U) -> bool {
         for tx in &self.transactions {
             if tx.validate(utxos).is_err() {
                 return false;
