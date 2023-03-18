@@ -1,6 +1,6 @@
 pub use crate::address::*;
 pub use crate::hashes::*;
-use crate::traits::{OutputStore, UtxoSet};
+use crate::traits::UtxoMap;
 use ed25519_dalek::{Signer, Verifier};
 use std::collections::HashMap;
 
@@ -78,18 +78,8 @@ pub struct Transaction {
 }
 
 impl Transaction {
-    pub fn get_spent_outputs<O: OutputStore<OutPoint, Output>>(
-        &self,
-        store: &O,
-    ) -> Option<Vec<Output>> {
-        self.inputs
-            .iter()
-            .map(|outpoint| store.get_output(outpoint).cloned())
-            .collect()
-    }
-
-    pub fn get_fee<O: OutputStore<OutPoint, Output>>(&self, store: &O) -> Option<u64> {
-        let spent_outputs = match self.get_spent_outputs(store) {
+    pub fn get_fee<U: UtxoMap<OutPoint, Output>>(&self, utxos: &U) -> Option<u64> {
+        let spent_outputs = match utxos.get_utxos(&self.inputs) {
             Some(spent_outputs) => spent_outputs,
             None => return None,
         };
@@ -117,16 +107,12 @@ impl Transaction {
         hash(self).into()
     }
 
-    pub fn validate<U: UtxoSet<OutPoint>, O: OutputStore<OutPoint, Output>>(
-        &self,
-        utxo_set: &U,
-        outputs: &O,
-    ) -> Result<(), String> {
+    pub fn validate<U: UtxoMap<OutPoint, Output>>(&self, utxos: &U) -> Result<(), String> {
+        let spent_outputs = match utxos.get_utxos(&self.inputs) {
+            Some(spent_outputs) => spent_outputs,
+            None => return Err("can not get transaction inputs".into()),
+        };
         let (value_in, value_out) = {
-            let spent_outputs = match self.get_spent_outputs(outputs) {
-                Some(spent_outputs) => spent_outputs,
-                None => return Err("can not get transaction inputs".into()),
-            };
             let value_in: u64 = spent_outputs.iter().map(|i| i.get_value()).sum();
             let value_out: u64 = self.outputs.iter().map(|o| o.get_value()).sum();
             (value_in, value_out)
@@ -134,23 +120,19 @@ impl Transaction {
         if value_in < value_out {
             return Err("value in < value out".into());
         }
-        let txid_without_authorizations = self.without_authorizations().txid();
+        if utxos.any_spent(&self.inputs) {
+            return Err("output is double spent".into());
+        }
         if self.inputs.len() != self.authorizations.len() {
             return Err("not enough authorizations".into());
         }
-        for (outpoint, authorization) in self.inputs.iter().zip(self.authorizations.iter()) {
-            if utxo_set.is_spent(outpoint) {
-                return Err("output is double spent".into());
+        let txid_without_authorizations = self.without_authorizations().txid();
+        for (spent_output, authorization) in spent_outputs.iter().zip(self.authorizations.iter()) {
+            if authorization.get_address() != spent_output.get_address() {
+                return Err("authorization address does not match spent output address".into());
             }
             if !authorization.is_valid(txid_without_authorizations) {
                 return Err("invalid authorization".into());
-            }
-            if let Some(spent_output) = outputs.get_output(outpoint) {
-                if spent_output.get_address() != authorization.get_address() {
-                    return Err("addresses don't match".into());
-                }
-            } else {
-                return Err("output doesn't exist".into());
             }
         }
         Ok(())
@@ -203,17 +185,13 @@ impl Body {
         outputs
     }
 
-    pub fn validate<U: UtxoSet<OutPoint>, O: OutputStore<OutPoint, Output>>(
-        &self,
-        utxo_set: &U,
-        outputs: &O,
-    ) -> bool {
+    pub fn validate<U: UtxoMap<OutPoint, Output>>(&self, utxos: &U) -> bool {
         for tx in &self.transactions {
-            if tx.validate(utxo_set, outputs).is_err() {
+            if tx.validate(utxos).is_err() {
                 return false;
             }
         }
-        let fees: Option<u64> = self.transactions.iter().map(|tx| tx.get_fee(outputs)).sum();
+        let fees: Option<u64> = self.transactions.iter().map(|tx| tx.get_fee(utxos)).sum();
         let fees = match fees {
             Some(fees) => fees,
             None => return false,

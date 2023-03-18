@@ -1,23 +1,23 @@
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 
-pub trait UtxoSet<P> {
-    fn is_spent(&self, outpoint: &P) -> bool;
-}
-
-pub trait OutputStore<P, O> {
-    fn get_output(&self, outpoint: &P) -> Option<&O>;
-}
-
-impl<P: std::cmp::Eq + std::hash::Hash + Clone> UtxoSet<P> for HashSet<P> {
+pub trait UtxoMap<P, O> {
+    fn get_utxo(&self, outpoint: &P) -> Option<O>;
+    fn get_utxos(&self, outpoints: &[P]) -> Option<Vec<O>> {
+        outpoints
+            .iter()
+            .map(|outpoint| self.get_utxo(outpoint))
+            .collect()
+    }
     fn is_spent(&self, outpoint: &P) -> bool {
-        self.contains(outpoint)
+        self.get_utxo(outpoint).is_none()
+    }
+    fn any_spent(&self, outpoints: &[P]) -> bool {
+        outpoints.iter().any(|outpoint| self.is_spent(outpoint))
     }
 }
 
-impl<'a, P: std::cmp::Eq + std::hash::Hash + Clone + 'a, O: 'a> OutputStore<P, O>
-    for HashMap<P, O>
-{
-    fn get_output(&self, outpoint: &P) -> Option<&O> {
-        self.get(outpoint)
+impl<P: std::cmp::Eq + std::hash::Hash + Clone, O: Clone> UtxoMap<P, O> for HashMap<P, O> {
+    fn get_utxo(&self, outpoint: &P) -> Option<O> {
+        self.get(outpoint).cloned()
     }
 }

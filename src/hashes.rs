@@ -33,6 +33,12 @@ impl From<Hash> for MerkleRoot {
     }
 }
 
+impl From<MerkleRoot> for Hash {
+    fn from(other: MerkleRoot) -> Self {
+        other.0
+    }
+}
+
 impl std::fmt::Display for MerkleRoot {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "{}", hex::encode(self.0))

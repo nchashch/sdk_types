@@ -24,6 +24,12 @@ impl std::fmt::Debug for Address {
     }
 }
 
+impl From<Hash> for Address {
+    fn from(other: Hash) -> Self {
+        Self(other)
+    }
+}
+
 impl From<ed25519_dalek::PublicKey> for Address {
     fn from(other: ed25519_dalek::PublicKey) -> Self {
         Self(hash(&other.to_bytes()))
