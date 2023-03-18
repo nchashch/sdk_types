@@ -126,14 +126,20 @@ mod tests {
     #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
     enum Regular {
         Value { value: u64 },
+        Commitment { hash: Hash },
     }
 
-    impl CustomOutput for Regular {
+    impl GetValue for Regular {
         fn get_value(&self) -> u64 {
             match self {
                 Self::Value { value } => *value,
+                _ => 0,
             }
         }
+    }
+
+    impl Transaction<Regular> {
+        fn foo() {}
     }
 
     #[test]

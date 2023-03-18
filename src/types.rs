@@ -54,7 +54,7 @@ pub enum Output<R> {
     },
 }
 
-pub trait CustomOutput {
+pub trait GetValue {
     fn get_value(&self) -> u64;
 }
 
@@ -77,7 +77,7 @@ impl<R> Output<R> {
     }
 }
 
-impl<R: CustomOutput> CustomOutput for Output<R> {
+impl<R: GetValue> GetValue for Output<R> {
     fn get_value(&self) -> u64 {
         match self {
             Output::Regular { custom, .. } => custom.get_value(),
@@ -94,13 +94,16 @@ pub struct Transaction<R> {
     pub outputs: Vec<Output<R>>,
 }
 
-impl<R: Clone + CustomOutput + Serialize + for<'de> Deserialize<'de>> Transaction<R> {
+impl<R: Clone + GetValue + Serialize + for<'de> Deserialize<'de>> Transaction<R> {
     pub fn get_fee<U: UtxoMap<OutPoint, Output<R>>>(&self, utxos: &U) -> Option<u64> {
-        let spent_outputs = match utxos.get_utxos(&self.inputs) {
-            Some(spent_outputs) => spent_outputs,
-            None => return None,
-        };
-        let value_in: u64 = spent_outputs.iter().map(|i| i.get_value()).sum();
+        let mut spent_utxos = vec![];
+        for utxo in utxos.get_utxos(&self.inputs) {
+            match utxo {
+                Some(utxo) => spent_utxos.push(utxo),
+                None => return None,
+            };
+        }
+        let value_in: u64 = spent_utxos.iter().map(|i| i.get_value()).sum();
         let value_out: u64 = self.outputs.iter().map(|o| o.get_value()).sum();
         Some(value_in - value_out)
     }
@@ -124,34 +127,44 @@ impl<R: Clone + CustomOutput + Serialize + for<'de> Deserialize<'de>> Transactio
         hash(self).into()
     }
 
-    pub fn validate<U: UtxoMap<OutPoint, Output<R>>>(&self, utxos: &U) -> Result<(), String> {
-        let spent_outputs = match utxos.get_utxos(&self.inputs) {
-            Some(spent_outputs) => spent_outputs,
-            None => return Err("can not get transaction inputs".into()),
-        };
+    pub fn is_authorized(&self, spent_utxos: &[Output<R>]) -> Result<(), String> {
+        if self.inputs.len() != self.authorizations.len() {
+            return Err("not enough authorizations".into());
+        }
+        let txid_without_authorizations = self.without_authorizations().txid();
+        for (spent_utxo, authorization) in spent_utxos.iter().zip(self.authorizations.iter()) {
+            if authorization.get_address() != spent_utxo.get_address() {
+                return Err("authorization address does not match spent utxo address".into());
+            }
+            if !authorization.is_valid(&txid_without_authorizations) {
+                return Err("invalid authorization".into());
+            }
+        }
+        Ok(())
+    }
+
+    pub fn is_value_valid(&self, spent_utxos: &[Output<R>]) -> Result<(), String> {
         let (value_in, value_out) = {
-            let value_in: u64 = spent_outputs.iter().map(|i| i.get_value()).sum();
+            let value_in: u64 = spent_utxos.iter().map(|i| i.get_value()).sum();
             let value_out: u64 = self.outputs.iter().map(|o| o.get_value()).sum();
             (value_in, value_out)
         };
         if value_in < value_out {
             return Err("value in < value out".into());
         }
-        if utxos.any_spent(&self.inputs) {
-            return Err("output is double spent".into());
+        Ok(())
+    }
+
+    pub fn validate<U: UtxoMap<OutPoint, Output<R>>>(&self, utxos: &U) -> Result<(), String> {
+        let mut spent_utxos = vec![];
+        for utxo in utxos.get_utxos(&self.inputs) {
+            match utxo {
+                Some(utxo) => spent_utxos.push(utxo),
+                None => return Err("utxo is double spent".into()),
+            };
         }
-        if self.inputs.len() != self.authorizations.len() {
-            return Err("not enough authorizations".into());
-        }
-        let txid_without_authorizations = self.without_authorizations().txid();
-        for (spent_output, authorization) in spent_outputs.iter().zip(self.authorizations.iter()) {
-            if authorization.get_address() != spent_output.get_address() {
-                return Err("authorization address does not match spent output address".into());
-            }
-            if !authorization.is_valid(&txid_without_authorizations) {
-                return Err("invalid authorization".into());
-            }
-        }
+        self.is_authorized(&spent_utxos)?;
+        self.is_value_valid(&spent_utxos)?;
         Ok(())
     }
 }
@@ -162,7 +175,7 @@ pub struct Body<R> {
     pub transactions: Vec<Transaction<R>>,
 }
 
-impl<R: Clone + CustomOutput + Serialize + for<'de> Deserialize<'de>> Body<R> {
+impl<R: Clone + GetValue + Serialize + for<'de> Deserialize<'de>> Body<R> {
     pub fn new(transactions: Vec<Transaction<R>>, coinbase: Vec<Output<R>>) -> Self {
         Self {
             coinbase,
@@ -221,22 +234,34 @@ impl<R: Clone + CustomOutput + Serialize + for<'de> Deserialize<'de>> Body<R> {
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
+struct AuthorizationsBatch {
+    txids: Vec<Txid>,
+    authorization_numbers: Vec<usize>,
+    authorizations: Vec<Authorization>,
+}
 
-    enum Regular {
-        Value { value: u64 },
-    }
-
-    impl CustomOutput for Regular {
-        fn get_value(&self) -> u64 {
-            match self {
-                Self::Value { value } => *value,
-            }
+impl AuthorizationsBatch {
+    pub fn verify(self) -> Result<(), ed25519_dalek::SignatureError> {
+        let unrolled_txids: Vec<&[u8]> = self
+            .txids
+            .iter()
+            .zip(self.authorization_numbers.iter())
+            .flat_map(|(txid, number)| std::iter::repeat(txid.as_slice()).take(*number))
+            .collect();
+        let mut signatures = Vec::with_capacity(self.authorizations.len());
+        let mut public_keys = Vec::with_capacity(self.authorizations.len());
+        for Authorization {
+            signature,
+            public_key,
+        } in self.authorizations.into_iter()
+        {
+            signatures.push(signature);
+            public_keys.push(public_key);
         }
+        ed25519_dalek::verify_batch(
+            unrolled_txids.as_slice(),
+            signatures.as_slice(),
+            public_keys.as_slice(),
+        )
     }
-
-    #[test]
-    fn test() {}
 }

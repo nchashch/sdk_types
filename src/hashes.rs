@@ -54,6 +54,12 @@ impl std::fmt::Debug for MerkleRoot {
 #[derive(Clone, Copy, Eq, PartialEq, Hash, serde::Serialize, serde::Deserialize)]
 pub struct Txid(pub Hash);
 
+impl Txid {
+    pub fn as_slice(&self) -> &[u8] {
+        self.0.as_slice()
+    }
+}
+
 impl From<Hash> for Txid {
     fn from(other: Hash) -> Self {
         Self(other)
