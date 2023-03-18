@@ -23,7 +23,10 @@ mod tests {
         keypairs
     }
 
-    fn random_deposits(num_deposits: usize, addresses: &[Address]) -> HashMap<OutPoint, Output> {
+    fn random_deposits(
+        num_deposits: usize,
+        addresses: &[Address],
+    ) -> HashMap<OutPoint, Output<Regular>> {
         const MAX_MONEY: u64 = 21_000_000_00_000_000;
         (0..num_deposits)
             .map(|_| {
@@ -37,20 +40,27 @@ mod tests {
                     let value = (0..MAX_MONEY).fake();
                     let index: usize = (0..addresses.len()).fake();
                     let address = addresses[index];
-                    Output::Regular { address, value }
+                    Output::Deposit { address, value }
                 };
                 (outpoint, output)
             })
             .collect()
     }
 
-    fn random_outputs(num_outputs: usize, value_in: u64, addresses: &[Address]) -> Vec<Output> {
+    fn random_outputs(
+        num_outputs: usize,
+        value_in: u64,
+        addresses: &[Address],
+    ) -> Vec<Output<Regular>> {
         let value = value_in / (num_outputs as u64);
         (0..num_outputs)
             .map(|_| {
                 let index: usize = (0..addresses.len()).fake();
                 let address = addresses[index];
-                Output::Regular { value, address }
+                Output::Regular {
+                    address,
+                    custom: Regular::Value { value },
+                }
             })
             .collect()
     }
@@ -60,9 +70,9 @@ mod tests {
         num_outputs: usize,
         unspent_outpoints: &HashSet<OutPoint>,
         utxo_set: &HashSet<OutPoint>,
-        outputs: &HashMap<OutPoint, Output>,
+        outputs: &HashMap<OutPoint, Output<Regular>>,
         keypairs: &HashMap<Address, Keypair>,
-    ) -> (Transaction, HashSet<OutPoint>) {
+    ) -> (Transaction<Regular>, HashSet<OutPoint>) {
         let addresses: Vec<Address> = keypairs.keys().copied().collect();
         let (inputs, addresses) = {
             let outpoints: Vec<OutPoint> = utxo_set.iter().copied().collect();
@@ -84,9 +94,10 @@ mod tests {
             .sum();
         let outputs = random_outputs(num_outputs, value_in, &addresses);
         let transaction = Transaction::new(inputs.clone(), outputs);
+        let txid_without_authorizations = transaction.without_authorizations().txid();
         let authorizations = addresses
             .iter()
-            .map(|address| Authorization::new(&keypairs[&address], &transaction))
+            .map(|address| Authorization::new(&keypairs[&address], &txid_without_authorizations))
             .collect();
         (
             Transaction {
@@ -98,11 +109,11 @@ mod tests {
     }
 
     fn random_body(
-        transactions: Vec<Transaction>,
+        transactions: Vec<Transaction<Regular>>,
         num_coinbase_outputs: usize,
-        outputs: &HashMap<OutPoint, Output>,
+        outputs: &HashMap<OutPoint, Output<Regular>>,
         keypairs: &HashMap<Address, Keypair>,
-    ) -> Body {
+    ) -> Body<Regular> {
         let addresses: Vec<Address> = keypairs.keys().copied().collect();
         let fee: u64 = transactions
             .iter()
@@ -112,23 +123,35 @@ mod tests {
         Body::new(transactions, coinbase)
     }
 
+    #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+    enum Regular {
+        Value { value: u64 },
+    }
+
+    impl CustomOutput for Regular {
+        fn get_value(&self) -> u64 {
+            match self {
+                Self::Value { value } => *value,
+            }
+        }
+    }
+
     #[test]
     fn test() {
         let keypairs = random_keypairs(10);
         let addresses: Vec<Address> = keypairs.keys().copied().collect();
         let deposit_outputs = random_deposits(5, &addresses);
 
-        let mut utxo_set: HashSet<OutPoint> = HashSet::new();
-        let mut outputs: HashMap<OutPoint, Output> = HashMap::new();
+        let mut utxo_map: HashMap<OutPoint, Output<Regular>> = HashMap::new();
 
-        utxo_set.extend(deposit_outputs.keys());
-        outputs.extend(deposit_outputs);
-
+        utxo_map.extend(deposit_outputs);
+        let mut utxo_set = HashSet::new();
+        utxo_set.extend(utxo_map.keys());
         let mut unspent_outpoints = utxo_set.clone();
         let transactions = (0..2)
             .map(|_| {
                 let (transaction, spent_outpoints) =
-                    random_transaction(1, 1, &unspent_outpoints, &utxo_set, &outputs, &keypairs);
+                    random_transaction(1, 1, &unspent_outpoints, &utxo_set, &utxo_map, &keypairs);
                 unspent_outpoints = unspent_outpoints
                     .difference(&spent_outpoints)
                     .copied()
@@ -137,9 +160,9 @@ mod tests {
             })
             .collect();
 
-        let body = random_body(transactions, 1, &outputs, &keypairs);
-        body.validate(&utxo_set, &outputs);
-        dbg!(&utxo_set);
+        let body = random_body(transactions, 1, &utxo_map, &keypairs);
+        body.validate(&utxo_map);
+        dbg!(&utxo_map);
         {
             let inputs = body.get_inputs();
             let new_outputs = body.get_outputs();
@@ -147,9 +170,9 @@ mod tests {
                 utxo_set.remove(input);
             }
             utxo_set.extend(new_outputs.keys());
-            outputs.extend(new_outputs);
+            utxo_map.extend(new_outputs);
         }
-        dbg!(&utxo_set);
+        dbg!(&utxo_map);
         dbg!(body.coinbase.len());
         dbg!(body.transactions.len());
         dbg!(body.transactions);

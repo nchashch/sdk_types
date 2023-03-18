@@ -38,7 +38,14 @@ impl Authorization {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum Output<R> {
-    Regular(R),
+    Regular {
+        address: Address,
+        custom: R,
+    },
+    Deposit {
+        address: Address,
+        value: u64,
+    },
     Withdrawal {
         value: u64,
         main_fee: u64,
@@ -47,27 +54,34 @@ pub enum Output<R> {
     },
 }
 
-trait CustomOutput {
-    fn get_address(&self) -> Address;
+pub trait CustomOutput {
     fn get_value(&self) -> u64;
 }
 
-impl<R: CustomOutput> Output<R> {
+impl<R> Output<R> {
     pub fn is_withdrawal(&self) -> bool {
-        match self {
-            Self::Withdrawal { .. } => true,
-            _ => false,
-        }
+        matches!(self, Self::Withdrawal { .. })
+    }
+    pub fn is_deposit(&self) -> bool {
+        matches!(self, Self::Deposit { .. })
+    }
+    pub fn is_regular(&self) -> bool {
+        matches!(self, Self::Regular { .. })
     }
     pub fn get_address(&self) -> Address {
         match self {
-            Output::Regular(output) => output.get_address(),
+            Output::Regular { address, .. } => *address,
+            Output::Deposit { address, .. } => *address,
             Output::Withdrawal { side_address, .. } => *side_address,
         }
     }
-    pub fn get_value(&self) -> u64 {
+}
+
+impl<R: CustomOutput> CustomOutput for Output<R> {
+    fn get_value(&self) -> u64 {
         match self {
-            Output::Regular(output) => output.get_value(),
+            Output::Regular { custom, .. } => custom.get_value(),
+            Output::Deposit { value, .. } => *value,
             Output::Withdrawal { value, .. } => *value,
         }
     }
@@ -205,4 +219,24 @@ impl<R: Clone + CustomOutput + Serialize + for<'de> Deserialize<'de>> Body<R> {
         }
         true
     }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    enum Regular {
+        Value { value: u64 },
+    }
+
+    impl CustomOutput for Regular {
+        fn get_value(&self) -> u64 {
+            match self {
+                Self::Value { value } => *value,
+            }
+        }
+    }
+
+    #[test]
+    fn test() {}
 }
