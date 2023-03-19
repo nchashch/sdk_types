@@ -1,5 +1,6 @@
 use crate::types::*;
 use serde::Serialize;
+use std::collections::HashSet;
 
 pub trait CustomValidator<C> {
     fn custom_validate_transaction(
@@ -22,6 +23,15 @@ pub trait RegularValidator<C: GetValue> {
             if Address::from(authorization.public_key) != spent_utxo.get_address() {
                 return Err("authorization address does not match spent utxo address".into());
             }
+        }
+
+        // No double spends within transaction
+        let mut seen_inputs: HashSet<OutPoint> = HashSet::with_capacity(transaction.inputs.len());
+        for input in &transaction.inputs {
+            if seen_inputs.contains(input) {
+                return Err("utxo is double spent in transaction".into());
+            }
+            seen_inputs.insert(*input);
         }
 
         // Accounting
@@ -64,9 +74,14 @@ pub trait Validator<C: GetValue + Clone + Serialize>:
 pub fn verify_signatures<C: Clone + Serialize>(
     transactions: &[Transaction<C>],
 ) -> Result<(), ed25519_dalek::SignatureError> {
-    let mut messages = vec![];
-    let mut signatures = vec![];
-    let mut public_keys = vec![];
+    let capacity: usize = transactions
+        .iter()
+        .map(|transaction| transaction.authorizations.len())
+        .sum();
+
+    let mut messages = Vec::with_capacity(capacity);
+    let mut signatures = Vec::with_capacity(capacity);
+    let mut public_keys = Vec::with_capacity(capacity);
 
     for transaction in transactions {
         let transaction_without_authorizations = Transaction {

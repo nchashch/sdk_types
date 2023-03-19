@@ -5,3 +5,4 @@ mod types;
 mod validator;
 
 pub use types::*;
+pub use validator::*;
