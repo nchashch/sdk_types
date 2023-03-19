@@ -8,7 +8,7 @@ mod tests {
     use super::*;
     use crate::*;
     use bitcoin::hashes::Hash as _;
-    use ed25519_dalek::Keypair;
+    use ed25519_dalek::{Keypair, Signer};
     use rand::{CryptoRng, Rng, RngCore};
     use std::collections::{HashMap, HashSet};
 
@@ -90,11 +90,18 @@ mod tests {
             .map(|outpoint| outputs[outpoint].get_value())
             .sum();
         let outputs = random_outputs(num_outputs, value_in, &addresses);
-        let transaction = Transaction::new(inputs.clone(), outputs);
-        let txid_without_authorizations = transaction.without_authorizations().txid();
+        let transaction = Transaction {
+            inputs: inputs.clone(),
+            outputs,
+            authorizations: vec![],
+        };
+        let transaction_hash_without_authorizations = hash(&transaction);
         let authorizations = addresses
             .iter()
-            .map(|address| Authorization::new(&keypairs[&address], &txid_without_authorizations))
+            .map(|address| Authorization {
+                signature: keypairs[address].sign(&transaction_hash_without_authorizations),
+                public_key: keypairs[address].public,
+            })
             .collect();
         (
             Transaction {
@@ -114,7 +121,7 @@ mod tests {
         let addresses: Vec<Address> = keypairs.keys().copied().collect();
         let fee: u64 = transactions
             .iter()
-            .map(|tx| tx.get_fee(outputs).unwrap())
+            .map(|tx| get_fee(&outputs, &tx).unwrap())
             .sum();
         let coinbase = random_outputs(num_coinbase_outputs, fee, &addresses);
         Body::new(transactions, coinbase)
@@ -130,6 +137,33 @@ mod tests {
     impl Transaction<Custom> {
         fn foo() {}
     }
+
+    use validator::{AuthorizationValidator, CustomValidator, RegularValidator, Validator};
+
+    fn get_fee(
+        utxos: &HashMap<OutPoint, Output<Custom>>,
+        transaction: &Transaction<Custom>,
+    ) -> Result<u64, String> {
+        let mut spent_utxos = vec![];
+        for utxo in utxos.get_utxos(&transaction.inputs) {
+            match utxo {
+                Some(utxo) => spent_utxos.push(utxo),
+                None => return Err("utxo is double spent".into()),
+            };
+        }
+        utxos.regular_validate_transaction(&spent_utxos, transaction)
+    }
+    impl CustomValidator<Custom> for HashMap<OutPoint, Output<Custom>> {
+        fn custom_validate_transaction(
+            &self,
+            spent_utxos: &[Output<Custom>],
+            transactino: &Transaction<Custom>,
+        ) -> Result<(), String> {
+            Ok(())
+        }
+    }
+    impl RegularValidator<Custom> for HashMap<OutPoint, Output<Custom>> {}
+    impl Validator<Custom> for HashMap<OutPoint, Output<Custom>> {}
 
     #[test]
     fn test() {
@@ -156,7 +190,24 @@ mod tests {
             .collect();
 
         let body = random_body(transactions, 1, &utxo_map, &keypairs);
-        body.validate(&utxo_map);
+        dbg!(AuthorizationValidator
+            .verify_signatures(&body.transactions)
+            .unwrap());
+
+        let body_spent_utxos: Vec<Vec<Output<Custom>>> = body
+            .transactions
+            .iter()
+            .map(|transaction| {
+                let spent_utxos: Vec<Output<Custom>> = utxo_map
+                    .get_utxos(&transaction.inputs)
+                    .into_iter()
+                    .collect::<Option<_>>()
+                    .unwrap();
+                spent_utxos
+            })
+            .collect();
+
+        dbg!(utxo_map.validate_body(&body_spent_utxos, &body).unwrap());
         dbg!(&utxo_map);
         {
             let inputs = body.get_inputs();
