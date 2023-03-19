@@ -138,7 +138,7 @@ mod tests {
         fn foo() {}
     }
 
-    use validator::{AuthorizationValidator, CustomValidator, RegularValidator, Validator};
+    use validator::{verify_signatures, CustomValidator, RegularValidator, Validator};
 
     fn get_fee(
         utxos: &HashMap<OutPoint, Output<Custom>>,
@@ -190,9 +190,7 @@ mod tests {
             .collect();
 
         let body = random_body(transactions, 1, &utxo_map, &keypairs);
-        dbg!(AuthorizationValidator
-            .verify_signatures(&body.transactions)
-            .unwrap());
+        dbg!(verify_signatures(&body.transactions).unwrap());
 
         let body_spent_utxos: Vec<Vec<Output<Custom>>> = body
             .transactions
@@ -222,5 +220,18 @@ mod tests {
         dbg!(body.coinbase.len());
         dbg!(body.transactions.len());
         dbg!(body.transactions);
+    }
+
+    pub trait UtxoMap<P, O> {
+        fn get_utxos(&self, outpoints: &[P]) -> Vec<Option<O>>;
+    }
+
+    impl<P: std::cmp::Eq + std::hash::Hash + Clone, O: Clone> UtxoMap<P, O> for HashMap<P, O> {
+        fn get_utxos(&self, outpoints: &[P]) -> Vec<Option<O>> {
+            outpoints
+                .iter()
+                .map(|outpoint| self.get(outpoint).cloned())
+                .collect()
+        }
     }
 }

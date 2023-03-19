@@ -1,6 +1,4 @@
-use crate::traits::*;
 use crate::types::*;
-use ed25519_dalek::Verifier;
 use serde::Serialize;
 
 pub trait CustomValidator<C> {
@@ -63,58 +61,31 @@ pub trait Validator<C: GetValue + Clone + Serialize>:
     }
 }
 
-pub struct AuthorizationValidator;
+pub fn verify_signatures<C: Clone + Serialize>(
+    transactions: &[Transaction<C>],
+) -> Result<(), ed25519_dalek::SignatureError> {
+    let mut messages = vec![];
+    let mut signatures = vec![];
+    let mut public_keys = vec![];
 
-impl AuthorizationValidator {
-    pub fn verify_signatures<C: Clone + Serialize>(
-        &self,
-        transactions: &[Transaction<C>],
-    ) -> Result<(), ed25519_dalek::SignatureError> {
-        for transaction in transactions {
-            let transaction = Transaction {
-                authorizations: vec![],
-                ..transaction.clone()
-            };
-            let transaction_hash_without_authorizations = hash(&transaction);
-            for authorization in &transaction.authorizations {
-                authorization.public_key.verify(
-                    &transaction_hash_without_authorizations,
-                    &authorization.signature,
-                )?;
-            }
+    for transaction in transactions {
+        let transaction_without_authorizations = Transaction {
+            authorizations: vec![],
+            ..transaction.clone()
+        };
+        let message = hash(&transaction_without_authorizations);
+        for authorization in &transaction.authorizations {
+            messages.push(message);
+            signatures.push(authorization.signature);
+            public_keys.push(authorization.public_key);
         }
-        Ok(())
     }
-}
+    let messages: Vec<&[u8]> = messages.iter().map(|message| message.as_slice()).collect();
 
-struct AuthorizationsBatch {
-    txids: Vec<Txid>,
-    authorization_numbers: Vec<usize>,
-    authorizations: Vec<Authorization>,
-}
-
-impl AuthorizationsBatch {
-    pub fn verify(self) -> Result<(), ed25519_dalek::SignatureError> {
-        let unrolled_txids: Vec<&[u8]> = self
-            .txids
-            .iter()
-            .zip(self.authorization_numbers.iter())
-            .flat_map(|(txid, number)| std::iter::repeat(txid.as_slice()).take(*number))
-            .collect();
-        let mut signatures = Vec::with_capacity(self.authorizations.len());
-        let mut public_keys = Vec::with_capacity(self.authorizations.len());
-        for Authorization {
-            signature,
-            public_key,
-        } in self.authorizations.into_iter()
-        {
-            signatures.push(signature);
-            public_keys.push(public_key);
-        }
-        ed25519_dalek::verify_batch(
-            unrolled_txids.as_slice(),
-            signatures.as_slice(),
-            public_keys.as_slice(),
-        )
-    }
+    ed25519_dalek::verify_batch(
+        messages.as_slice(),
+        signatures.as_slice(),
+        public_keys.as_slice(),
+    )?;
+    Ok(())
 }
