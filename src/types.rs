@@ -61,6 +61,7 @@ pub trait GetValue {
 }
 
 impl<C: GetValue> GetValue for Output<C> {
+    #[inline(always)]
     fn get_value(&self) -> u64 {
         match self {
             Output::Custom { custom, .. } => custom.get_value(),
