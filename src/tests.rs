@@ -26,7 +26,7 @@ mod tests {
     fn random_deposits(
         num_deposits: usize,
         addresses: &[Address],
-    ) -> HashMap<OutPoint, Output<Regular>> {
+    ) -> HashMap<OutPoint, Output<Custom>> {
         const MAX_MONEY: u64 = 21_000_000_00_000_000;
         (0..num_deposits)
             .map(|_| {
@@ -40,7 +40,7 @@ mod tests {
                     let value = (0..MAX_MONEY).fake();
                     let index: usize = (0..addresses.len()).fake();
                     let address = addresses[index];
-                    Output::Deposit { address, value }
+                    Output::Regular { address, value }
                 };
                 (outpoint, output)
             })
@@ -51,16 +51,13 @@ mod tests {
         num_outputs: usize,
         value_in: u64,
         addresses: &[Address],
-    ) -> Vec<Output<Regular>> {
+    ) -> Vec<Output<Custom>> {
         let value = value_in / (num_outputs as u64);
         (0..num_outputs)
             .map(|_| {
                 let index: usize = (0..addresses.len()).fake();
                 let address = addresses[index];
-                Output::Regular {
-                    address,
-                    custom: Regular::Value { value },
-                }
+                Output::Regular { address, value }
             })
             .collect()
     }
@@ -70,9 +67,9 @@ mod tests {
         num_outputs: usize,
         unspent_outpoints: &HashSet<OutPoint>,
         utxo_set: &HashSet<OutPoint>,
-        outputs: &HashMap<OutPoint, Output<Regular>>,
+        outputs: &HashMap<OutPoint, Output<Custom>>,
         keypairs: &HashMap<Address, Keypair>,
-    ) -> (Transaction<Regular>, HashSet<OutPoint>) {
+    ) -> (Transaction<Custom>, HashSet<OutPoint>) {
         let addresses: Vec<Address> = keypairs.keys().copied().collect();
         let (inputs, addresses) = {
             let outpoints: Vec<OutPoint> = utxo_set.iter().copied().collect();
@@ -109,11 +106,11 @@ mod tests {
     }
 
     fn random_body(
-        transactions: Vec<Transaction<Regular>>,
+        transactions: Vec<Transaction<Custom>>,
         num_coinbase_outputs: usize,
-        outputs: &HashMap<OutPoint, Output<Regular>>,
+        outputs: &HashMap<OutPoint, Output<Custom>>,
         keypairs: &HashMap<Address, Keypair>,
-    ) -> Body<Regular> {
+    ) -> Body<Custom> {
         let addresses: Vec<Address> = keypairs.keys().copied().collect();
         let fee: u64 = transactions
             .iter()
@@ -123,22 +120,14 @@ mod tests {
         Body::new(transactions, coinbase)
     }
 
-    #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
-    enum Regular {
-        Value { value: u64 },
-        Commitment { hash: Hash },
-    }
-
-    impl GetValue for Regular {
+    type Custom = ();
+    impl GetValue for () {
         fn get_value(&self) -> u64 {
-            match self {
-                Self::Value { value } => *value,
-                _ => 0,
-            }
+            0
         }
     }
 
-    impl Transaction<Regular> {
+    impl Transaction<Custom> {
         fn foo() {}
     }
 
@@ -148,7 +137,7 @@ mod tests {
         let addresses: Vec<Address> = keypairs.keys().copied().collect();
         let deposit_outputs = random_deposits(5, &addresses);
 
-        let mut utxo_map: HashMap<OutPoint, Output<Regular>> = HashMap::new();
+        let mut utxo_map: HashMap<OutPoint, Output<Custom>> = HashMap::new();
 
         utxo_map.extend(deposit_outputs);
         let mut utxo_set = HashSet::new();

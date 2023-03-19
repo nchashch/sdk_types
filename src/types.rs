@@ -37,12 +37,12 @@ impl Authorization {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub enum Output<R> {
-    Regular {
+pub enum Output<C> {
+    Custom {
         address: Address,
-        custom: R,
+        custom: C,
     },
-    Deposit {
+    Regular {
         address: Address,
         value: u64,
     },
@@ -58,44 +58,44 @@ pub trait GetValue {
     fn get_value(&self) -> u64;
 }
 
-impl<R> Output<R> {
+impl<C> Output<C> {
     pub fn is_withdrawal(&self) -> bool {
         matches!(self, Self::Withdrawal { .. })
-    }
-    pub fn is_deposit(&self) -> bool {
-        matches!(self, Self::Deposit { .. })
     }
     pub fn is_regular(&self) -> bool {
         matches!(self, Self::Regular { .. })
     }
+    pub fn is_custom(&self) -> bool {
+        matches!(self, Self::Custom { .. })
+    }
     pub fn get_address(&self) -> Address {
         match self {
+            Output::Custom { address, .. } => *address,
             Output::Regular { address, .. } => *address,
-            Output::Deposit { address, .. } => *address,
             Output::Withdrawal { side_address, .. } => *side_address,
         }
     }
 }
 
-impl<R: GetValue> GetValue for Output<R> {
+impl<C: GetValue> GetValue for Output<C> {
     fn get_value(&self) -> u64 {
         match self {
-            Output::Regular { custom, .. } => custom.get_value(),
-            Output::Deposit { value, .. } => *value,
+            Output::Custom { custom, .. } => custom.get_value(),
+            Output::Regular { value, .. } => *value,
             Output::Withdrawal { value, .. } => *value,
         }
     }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct Transaction<R> {
+pub struct Transaction<C> {
     pub inputs: Vec<OutPoint>,
     pub authorizations: Vec<Authorization>,
-    pub outputs: Vec<Output<R>>,
+    pub outputs: Vec<Output<C>>,
 }
 
-impl<R: Clone + GetValue + Serialize + for<'de> Deserialize<'de>> Transaction<R> {
-    pub fn get_fee<U: UtxoMap<OutPoint, Output<R>>>(&self, utxos: &U) -> Option<u64> {
+impl<C: Clone + GetValue + Serialize + for<'de> Deserialize<'de>> Transaction<C> {
+    pub fn get_fee<U: UtxoMap<OutPoint, Output<C>>>(&self, utxos: &U) -> Option<u64> {
         let mut spent_utxos = vec![];
         for utxo in utxos.get_utxos(&self.inputs) {
             match utxo {
@@ -108,7 +108,7 @@ impl<R: Clone + GetValue + Serialize + for<'de> Deserialize<'de>> Transaction<R>
         Some(value_in - value_out)
     }
 
-    pub fn new(inputs: Vec<OutPoint>, outputs: Vec<Output<R>>) -> Self {
+    pub fn new(inputs: Vec<OutPoint>, outputs: Vec<Output<C>>) -> Self {
         Self {
             inputs,
             outputs,
@@ -116,7 +116,7 @@ impl<R: Clone + GetValue + Serialize + for<'de> Deserialize<'de>> Transaction<R>
         }
     }
 
-    pub fn without_authorizations(&self) -> Transaction<R> {
+    pub fn without_authorizations(&self) -> Transaction<C> {
         Transaction {
             authorizations: vec![],
             ..self.clone()
@@ -127,7 +127,7 @@ impl<R: Clone + GetValue + Serialize + for<'de> Deserialize<'de>> Transaction<R>
         hash(self).into()
     }
 
-    pub fn is_authorized(&self, spent_utxos: &[Output<R>]) -> Result<(), String> {
+    pub fn is_authorized(&self, spent_utxos: &[Output<C>]) -> Result<(), String> {
         if self.inputs.len() != self.authorizations.len() {
             return Err("not enough authorizations".into());
         }
@@ -143,7 +143,7 @@ impl<R: Clone + GetValue + Serialize + for<'de> Deserialize<'de>> Transaction<R>
         Ok(())
     }
 
-    pub fn is_value_valid(&self, spent_utxos: &[Output<R>]) -> Result<(), String> {
+    pub fn is_value_valid(&self, spent_utxos: &[Output<C>]) -> Result<(), String> {
         let (value_in, value_out) = {
             let value_in: u64 = spent_utxos.iter().map(|i| i.get_value()).sum();
             let value_out: u64 = self.outputs.iter().map(|o| o.get_value()).sum();
@@ -155,7 +155,7 @@ impl<R: Clone + GetValue + Serialize + for<'de> Deserialize<'de>> Transaction<R>
         Ok(())
     }
 
-    pub fn validate<U: UtxoMap<OutPoint, Output<R>>>(&self, utxos: &U) -> Result<(), String> {
+    pub fn validate<U: UtxoMap<OutPoint, Output<C>>>(&self, utxos: &U) -> Result<(), String> {
         let mut spent_utxos = vec![];
         for utxo in utxos.get_utxos(&self.inputs) {
             match utxo {
@@ -170,13 +170,13 @@ impl<R: Clone + GetValue + Serialize + for<'de> Deserialize<'de>> Transaction<R>
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct Body<R> {
-    pub coinbase: Vec<Output<R>>,
-    pub transactions: Vec<Transaction<R>>,
+pub struct Body<C> {
+    pub coinbase: Vec<Output<C>>,
+    pub transactions: Vec<Transaction<C>>,
 }
 
-impl<R: Clone + GetValue + Serialize + for<'de> Deserialize<'de>> Body<R> {
-    pub fn new(transactions: Vec<Transaction<R>>, coinbase: Vec<Output<R>>) -> Self {
+impl<C: Clone + GetValue + Serialize + for<'de> Deserialize<'de>> Body<C> {
+    pub fn new(transactions: Vec<Transaction<C>>, coinbase: Vec<Output<C>>) -> Self {
         Self {
             coinbase,
             transactions,
@@ -196,7 +196,7 @@ impl<R: Clone + GetValue + Serialize + for<'de> Deserialize<'de>> Body<R> {
             .collect()
     }
 
-    pub fn get_outputs(&self) -> HashMap<OutPoint, Output<R>> {
+    pub fn get_outputs(&self) -> HashMap<OutPoint, Output<C>> {
         let mut outputs = HashMap::new();
         let merkle_root = self.compute_merkle_root();
         for (vout, output) in self.coinbase.iter().enumerate() {
@@ -215,7 +215,7 @@ impl<R: Clone + GetValue + Serialize + for<'de> Deserialize<'de>> Body<R> {
         outputs
     }
 
-    pub fn validate<U: UtxoMap<OutPoint, Output<R>>>(&self, utxos: &U) -> bool {
+    pub fn validate<U: UtxoMap<OutPoint, Output<C>>>(&self, utxos: &U) -> bool {
         for tx in &self.transactions {
             if tx.validate(utxos).is_err() {
                 return false;
