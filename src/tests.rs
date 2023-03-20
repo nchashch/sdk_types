@@ -44,7 +44,10 @@ mod tests {
                     let value = (0..MAX_MONEY).fake();
                     let index: usize = (0..addresses.len()).fake();
                     let address = addresses[index];
-                    Output::Regular { address, value }
+                    Output {
+                        address,
+                        content: Content::Value(value),
+                    }
                 };
                 (outpoint, output)
             })
@@ -61,7 +64,10 @@ mod tests {
             .map(|_| {
                 let index: usize = (0..addresses.len()).fake();
                 let address = addresses[index];
-                Output::Regular { address, value }
+                Output {
+                    address,
+                    content: Content::Value(value),
+                }
             })
             .collect()
     }

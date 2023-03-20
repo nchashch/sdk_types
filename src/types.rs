@@ -14,49 +14,55 @@ pub enum OutPoint {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub enum Output<C> {
-    Custom {
-        address: Address,
-        custom: C,
-    },
-    Regular {
-        address: Address,
-        value: u64,
-    },
+pub struct Output<C> {
+    pub address: Address,
+    pub content: Content<C>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub enum Content<C> {
+    Custom(C),
+    Value(u64),
     Withdrawal {
         value: u64,
         main_fee: u64,
-        side_address: Address,
         main_address: bitcoin::Address,
     },
 }
 
-impl<C> Output<C> {
+impl<C> Content<C> {
     pub fn is_custom(&self) -> bool {
-        matches!(self, Self::Custom { .. })
+        matches!(self, Self::Custom(_))
     }
     pub fn is_regular(&self) -> bool {
-        matches!(self, Self::Regular { .. })
+        matches!(self, Self::Value(_))
     }
     pub fn is_withdrawal(&self) -> bool {
         matches!(self, Self::Withdrawal { .. })
     }
-    pub fn get_address(&self) -> Address {
-        match self {
-            Output::Custom { address, .. } => *address,
-            Output::Regular { address, .. } => *address,
-            Output::Withdrawal { side_address, .. } => *side_address,
-        }
+}
+
+impl<C> GetAddress for Output<C> {
+    #[inline(always)]
+    fn get_address(&self) -> Address {
+        self.address
     }
 }
 
 impl<C: GetValue> GetValue for Output<C> {
     #[inline(always)]
     fn get_value(&self) -> u64 {
+        self.content.get_value()
+    }
+}
+
+impl<C: GetValue> GetValue for Content<C> {
+    #[inline(always)]
+    fn get_value(&self) -> u64 {
         match self {
-            Output::Custom { custom, .. } => custom.get_value(),
-            Output::Regular { value, .. } => *value,
-            Output::Withdrawal { value, .. } => *value,
+            Self::Custom(custom) => custom.get_value(),
+            Self::Value(value) => *value,
+            Self::Withdrawal { value, .. } => *value,
         }
     }
 }
