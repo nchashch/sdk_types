@@ -6,11 +6,15 @@ use quickcheck_macros::quickcheck;
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::dalek_authorization::*;
     use crate::*;
     use bitcoin::hashes::Hash as _;
     use ed25519_dalek::{Keypair, Signer};
     use rand::{CryptoRng, Rng, RngCore};
     use std::collections::{HashMap, HashSet};
+
+    type CTransaction = Transaction<Authorization, Custom>;
+    type CBody = Body<Authorization, Custom>;
 
     fn random_keypairs(num_keys: usize) -> HashMap<Address, Keypair> {
         let mut csprng = rand::thread_rng();
@@ -69,7 +73,7 @@ mod tests {
         utxo_set: &HashSet<OutPoint>,
         outputs: &HashMap<OutPoint, Output<Custom>>,
         keypairs: &HashMap<Address, Keypair>,
-    ) -> (Transaction<Custom>, HashSet<OutPoint>) {
+    ) -> (CTransaction, HashSet<OutPoint>) {
         let addresses: Vec<Address> = keypairs.keys().copied().collect();
         let (inputs, addresses) = {
             let outpoints: Vec<OutPoint> = utxo_set.iter().copied().collect();
@@ -90,7 +94,7 @@ mod tests {
             .map(|outpoint| outputs[outpoint].get_value())
             .sum();
         let outputs = random_outputs(num_outputs, value_in, &addresses);
-        let transaction = Transaction {
+        let transaction = CTransaction {
             inputs: inputs.clone(),
             outputs,
             authorizations: vec![],
@@ -104,7 +108,7 @@ mod tests {
             })
             .collect();
         (
-            Transaction {
+            CTransaction {
                 authorizations,
                 ..transaction
             },
@@ -113,11 +117,11 @@ mod tests {
     }
 
     fn random_body(
-        transactions: Vec<Transaction<Custom>>,
+        transactions: Vec<CTransaction>,
         num_coinbase_outputs: usize,
         outputs: &HashMap<OutPoint, Output<Custom>>,
         keypairs: &HashMap<Address, Keypair>,
-    ) -> Body<Custom> {
+    ) -> CBody {
         let addresses: Vec<Address> = keypairs.keys().copied().collect();
         let fee: u64 = transactions
             .iter()
@@ -134,15 +138,15 @@ mod tests {
         }
     }
 
-    impl Transaction<Custom> {
+    impl CTransaction {
         fn foo() {}
     }
 
-    use validator::{verify_signatures, CustomValidator, Validator};
+    use validator::{CustomValidator, Validator};
 
     fn get_fee(
         utxos: &HashMap<OutPoint, Output<Custom>>,
-        transaction: &Transaction<Custom>,
+        transaction: &CTransaction,
     ) -> Result<u64, String> {
         let mut spent_utxos = vec![];
         for utxo in utxos.get_utxos(&transaction.inputs) {
@@ -153,16 +157,16 @@ mod tests {
         }
         regular_validate_transaction(&spent_utxos, transaction)
     }
-    impl CustomValidator<Custom> for HashMap<OutPoint, Output<Custom>> {
+    impl CustomValidator<Authorization, Custom> for HashMap<OutPoint, Output<Custom>> {
         fn custom_validate_transaction(
             &self,
             spent_utxos: &[Output<Custom>],
-            transactino: &Transaction<Custom>,
+            transactino: &CTransaction,
         ) -> Result<(), String> {
             Ok(())
         }
     }
-    impl Validator<Custom> for HashMap<OutPoint, Output<Custom>> {}
+    impl Validator<Authorization, Custom> for HashMap<OutPoint, Output<Custom>> {}
 
     #[test]
     fn test() {

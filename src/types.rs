@@ -14,12 +14,6 @@ pub enum OutPoint {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct Authorization {
-    pub public_key: ed25519_dalek::PublicKey,
-    pub signature: ed25519_dalek::Signature,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum Output<C> {
     Custom {
         address: Address,
@@ -56,10 +50,6 @@ impl<C> Output<C> {
     }
 }
 
-pub trait GetValue {
-    fn get_value(&self) -> u64;
-}
-
 impl<C: GetValue> GetValue for Output<C> {
     #[inline(always)]
     fn get_value(&self) -> u64 {
@@ -72,26 +62,26 @@ impl<C: GetValue> GetValue for Output<C> {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct Transaction<C> {
+pub struct Transaction<A, C> {
     pub inputs: Vec<OutPoint>,
-    pub authorizations: Vec<Authorization>,
+    pub authorizations: Vec<A>,
     pub outputs: Vec<Output<C>>,
 }
 
-impl<C: Clone + Serialize> Transaction<C> {
+impl<A: Serialize, C: Serialize> Transaction<A, C> {
     pub fn txid(&self) -> Txid {
         hash(self).into()
     }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct Body<C> {
+pub struct Body<A, C> {
     pub coinbase: Vec<Output<C>>,
-    pub transactions: Vec<Transaction<C>>,
+    pub transactions: Vec<Transaction<A, C>>,
 }
 
-impl<C: Clone + GetValue + Serialize> Body<C> {
-    pub fn new(transactions: Vec<Transaction<C>>, coinbase: Vec<Output<C>>) -> Self {
+impl<A: Serialize, C: Clone + GetValue + Serialize> Body<A, C> {
+    pub fn new(transactions: Vec<Transaction<A, C>>, coinbase: Vec<Output<C>>) -> Self {
         Self {
             coinbase,
             transactions,
@@ -133,4 +123,12 @@ impl<C: Clone + GetValue + Serialize> Body<C> {
     pub fn get_coinbase_value(&self) -> u64 {
         self.coinbase.iter().map(|output| output.get_value()).sum()
     }
+}
+
+pub trait GetAddress {
+    fn get_address(&self) -> Address;
+}
+
+pub trait GetValue {
+    fn get_value(&self) -> u64;
 }
