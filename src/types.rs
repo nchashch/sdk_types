@@ -13,6 +13,16 @@ pub enum OutPoint {
     Deposit(bitcoin::OutPoint),
 }
 
+impl std::fmt::Display for OutPoint {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Regular { txid, vout } => write!(f, "regular {txid} {vout}"),
+            Self::Coinbase { merkle_root, vout } => write!(f, "coinbase {merkle_root} {vout}"),
+            Self::Deposit(bitcoin::OutPoint { txid, vout }) => write!(f, "deposit {txid} {vout}"),
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Output<C> {
     pub address: Address,
