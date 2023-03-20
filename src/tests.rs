@@ -138,7 +138,7 @@ mod tests {
         fn foo() {}
     }
 
-    use validator::{verify_signatures, CustomValidator, RegularValidator, Validator};
+    use validator::{verify_signatures, CustomValidator, Validator};
 
     fn get_fee(
         utxos: &HashMap<OutPoint, Output<Custom>>,
@@ -151,7 +151,7 @@ mod tests {
                 None => return Err("utxo is double spent".into()),
             };
         }
-        utxos.regular_validate_transaction(&spent_utxos, transaction)
+        regular_validate_transaction(&spent_utxos, transaction)
     }
     impl CustomValidator<Custom> for HashMap<OutPoint, Output<Custom>> {
         fn custom_validate_transaction(
@@ -162,7 +162,6 @@ mod tests {
             Ok(())
         }
     }
-    impl RegularValidator<Custom> for HashMap<OutPoint, Output<Custom>> {}
     impl Validator<Custom> for HashMap<OutPoint, Output<Custom>> {}
 
     #[test]
