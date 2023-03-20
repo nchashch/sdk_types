@@ -22,15 +22,6 @@ pub fn regular_validate_transaction<A: GetAddress, C: GetValue>(
         }
     }
 
-    // No double spends within transaction
-    let mut seen_inputs: HashSet<OutPoint> = HashSet::with_capacity(transaction.inputs.len());
-    for input in &transaction.inputs {
-        if seen_inputs.contains(input) {
-            return Err("utxo is double spent in transaction".into());
-        }
-        seen_inputs.insert(*input);
-    }
-
     // Accounting
     let (value_in, value_out) = {
         let value_in: u64 = spent_utxos.iter().map(|i| i.get_value()).sum();
@@ -61,6 +52,24 @@ pub trait Validator<A: GetAddress + Serialize, C: GetValue + Clone + Serialize>:
         body: &Body<A, C>,
     ) -> Result<u64, String> {
         let mut fees: u64 = 0;
+
+        // No UTXO is double spent within the same body.
+        let mut seen_inputs: HashSet<OutPoint> = body
+            .transactions
+            .iter()
+            .flat_map(|transaction| transaction.inputs.iter().copied())
+            .collect();
+        for input in body
+            .transactions
+            .iter()
+            .flat_map(|transaction| transaction.inputs.iter())
+        {
+            if seen_inputs.contains(input) {
+                return Err("utxo is double spent in transaction".into());
+            }
+            seen_inputs.insert(*input);
+        }
+
         for (transaction, spent_utxos) in body.transactions.iter().zip(spent_utxos.iter()) {
             fees += self.validate_transaction(spent_utxos, transaction)?;
         }
