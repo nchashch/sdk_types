@@ -1,4 +1,4 @@
-use crate::hashes::{hash, Hash};
+use crate::hashes::Hash;
 
 #[derive(Clone, Copy, Eq, PartialEq, Hash, serde::Serialize, serde::Deserialize)]
 pub struct Address(pub Hash);
@@ -27,12 +27,6 @@ impl std::fmt::Debug for Address {
 impl From<Hash> for Address {
     fn from(other: Hash) -> Self {
         Self(other)
-    }
-}
-
-impl From<ed25519_dalek::PublicKey> for Address {
-    fn from(other: ed25519_dalek::PublicKey) -> Self {
-        Self(hash(&other.to_bytes()))
     }
 }
 
