@@ -57,11 +57,13 @@ pub fn validate_body<A: GetAddress, C: GetValue + Clone + Serialize>(
         }
         seen_inputs.insert(*input);
     }
-    let mut index = 0;
-    for transaction in &body.transactions {
-        let spent_utxos = &spent_utxos[index..transaction.inputs.len()];
-        index += transaction.inputs.len();
-        fees += validate_transaction(spent_utxos, transaction)?;
+    {
+        let mut index = 0;
+        for transaction in &body.transactions {
+            let spent_utxos = &spent_utxos[index..transaction.inputs.len()];
+            index += transaction.inputs.len();
+            fees += validate_transaction(spent_utxos, transaction)?;
+        }
     }
     let coinbase_value = body.get_coinbase_value();
     if coinbase_value > fees {
@@ -78,6 +80,8 @@ pub trait State<C> {
     fn validate_transaction(
         &self,
         spent_utxos: &[Output<C>],
+        // A transaction's validity may depend on block_number.
+        block_number: u32,
         transaction: &Transaction<C>,
     ) -> Result<(), Self::Error>;
     fn validate_body<A>(
