@@ -22,7 +22,10 @@ pub fn validate_transaction<C: GetValue>(
     Ok(value_in - value_out)
 }
 
-// Returns total fee collected by body if it is valid.
+/// Returns total fee collected by body if it is valid.
+///
+/// NOTE: It does not verify authorizations! It only checks if authorization
+/// address matches the spent utxo address.
 pub fn validate_body<A: GetAddress, C: GetValue + Clone + Serialize>(
     spent_utxos: &[Vec<Output<C>>],
     body: &Body<A, C>,
