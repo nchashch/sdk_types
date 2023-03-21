@@ -91,8 +91,8 @@ impl<C: Serialize> Transaction<C> {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AuthorizedTransaction<A, C> {
-    transaction: Transaction<C>,
-    authorizations: Vec<A>,
+    pub transaction: Transaction<C>,
+    pub authorizations: Vec<A>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

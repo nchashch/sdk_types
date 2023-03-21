@@ -23,7 +23,7 @@ pub fn validate_transaction<C: GetValue>(
 }
 
 // Returns total fee collected by body if it is valid.
-fn validate_body<A: GetAddress + Clone + Serialize, C: GetValue + Clone + Serialize>(
+pub fn validate_body<A: GetAddress, C: GetValue + Clone + Serialize>(
     spent_utxos: &[Vec<Output<C>>],
     body: &Body<A, C>,
 ) -> Result<u64, Error> {
@@ -43,11 +43,8 @@ fn validate_body<A: GetAddress + Clone + Serialize, C: GetValue + Clone + Serial
     }
 
     // No UTXO is double spent within the same body.
-    let mut seen_inputs: HashSet<OutPoint> = body
-        .transactions
-        .iter()
-        .flat_map(|transaction| transaction.inputs.iter().copied())
-        .collect();
+    let mut seen_inputs: HashSet<OutPoint> =
+        HashSet::with_capacity(body.transactions.iter().map(|t| t.inputs.len()).sum());
     for input in body
         .transactions
         .iter()
@@ -71,7 +68,7 @@ fn validate_body<A: GetAddress + Clone + Serialize, C: GetValue + Clone + Serial
     Ok(fees)
 }
 
-pub trait State<A, C> {
+pub trait State<C> {
     type Error;
     fn validate_transaction(
         &self,
