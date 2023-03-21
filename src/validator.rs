@@ -3,22 +3,10 @@ use serde::Serialize;
 use std::collections::HashSet;
 
 // Returns the fee paid by transaction if it is valid.
-pub fn validate_transaction<A: GetAddress, C: GetValue>(
+pub fn validate_transaction<C: GetValue>(
     spent_utxos: &[Output<C>],
-    transaction: &Transaction<A, C>,
+    transaction: &Transaction<C>,
 ) -> Result<u64, Error> {
-    // Authorization public key matches spent utxo address
-    for (spent_utxo, authorization) in spent_utxos.iter().zip(transaction.authorizations.iter()) {
-        let authorization_address = authorization.get_address();
-        let utxo_address = spent_utxo.get_address();
-        if authorization_address != utxo_address {
-            return Err(Error::AddressesDontMatch {
-                authorization_address,
-                utxo_address,
-            });
-        }
-    }
-
     // Accounting
     let (value_in, value_out) = {
         let value_in: u64 = spent_utxos.iter().map(|i| i.get_value()).sum();
@@ -40,6 +28,19 @@ fn validate_body<A: GetAddress + Clone + Serialize, C: GetValue + Clone + Serial
     body: &Body<A, C>,
 ) -> Result<u64, Error> {
     let mut fees: u64 = 0;
+
+    // Authorization public key matches spent utxo address
+    for (spent_utxo, authorization) in spent_utxos.iter().flatten().zip(body.authorizations.iter())
+    {
+        let authorization_address = authorization.get_address();
+        let utxo_address = spent_utxo.get_address();
+        if authorization_address != utxo_address {
+            return Err(Error::AddressesDontMatch {
+                authorization_address,
+                utxo_address,
+            });
+        }
+    }
 
     // No UTXO is double spent within the same body.
     let mut seen_inputs: HashSet<OutPoint> = body
@@ -75,7 +76,7 @@ pub trait State<A, C> {
     fn validate_transaction(
         &self,
         spent_outputs: &[Output<C>],
-        transaction: &Transaction<A, C>,
+        transaction: &Transaction<C>,
     ) -> Result<(), Self::Error>;
     fn connect_outputs(&mut self, outputs: &[Output<C>]) -> Result<(), Self::Error>;
 }

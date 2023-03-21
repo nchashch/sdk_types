@@ -78,29 +78,50 @@ impl<C: GetValue> GetValue for Content<C> {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct Transaction<A, C> {
+pub struct Transaction<C> {
     pub inputs: Vec<OutPoint>,
-    pub authorizations: Vec<A>,
     pub outputs: Vec<Output<C>>,
 }
 
-impl<A: Serialize, C: Serialize> Transaction<A, C> {
+impl<C: Serialize> Transaction<C> {
     pub fn txid(&self) -> Txid {
         hash(self).into()
     }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct Body<A, C> {
-    pub coinbase: Vec<Output<C>>,
-    pub transactions: Vec<Transaction<A, C>>,
+pub struct AuthorizedTransaction<A, C> {
+    transaction: Transaction<C>,
+    authorizations: Vec<A>,
 }
 
-impl<A: Serialize, C: Clone + GetValue + Serialize> Body<A, C> {
-    pub fn new(transactions: Vec<Transaction<A, C>>, coinbase: Vec<Output<C>>) -> Self {
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Body<A, C> {
+    pub coinbase: Vec<Output<C>>,
+    pub transactions: Vec<Transaction<C>>,
+    pub authorizations: Vec<A>,
+}
+
+impl<A, C: Clone + GetValue + Serialize> Body<A, C> {
+    pub fn new(
+        authorized_transactions: Vec<AuthorizedTransaction<A, C>>,
+        coinbase: Vec<Output<C>>,
+    ) -> Self {
+        let mut authorizations = Vec::with_capacity(
+            authorized_transactions
+                .iter()
+                .map(|t| t.transaction.inputs.len())
+                .sum(),
+        );
+        let mut transactions = Vec::with_capacity(authorized_transactions.len());
+        for at in authorized_transactions.into_iter() {
+            authorizations.extend(at.authorizations);
+            transactions.push(at.transaction);
+        }
         Self {
             coinbase,
             transactions,
+            authorizations,
         }
     }
 
