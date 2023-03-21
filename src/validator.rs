@@ -27,14 +27,13 @@ pub fn validate_transaction<C: GetValue>(
 /// NOTE: It does not verify authorizations! It only checks if authorization
 /// address matches the spent utxo address.
 pub fn validate_body<A: GetAddress, C: GetValue + Clone + Serialize>(
-    spent_utxos: &[Vec<Output<C>>],
+    spent_utxos: &[Output<C>],
     body: &Body<A, C>,
 ) -> Result<u64, Error> {
     let mut fees: u64 = 0;
 
     // Authorization public key matches spent utxo address
-    for (spent_utxo, authorization) in spent_utxos.iter().flatten().zip(body.authorizations.iter())
-    {
+    for (spent_utxo, authorization) in spent_utxos.iter().zip(body.authorizations.iter()) {
         let authorization_address = authorization.get_address();
         let utxo_address = spent_utxo.get_address();
         if authorization_address != utxo_address {
@@ -58,7 +57,10 @@ pub fn validate_body<A: GetAddress, C: GetValue + Clone + Serialize>(
         }
         seen_inputs.insert(*input);
     }
-    for (transaction, spent_utxos) in body.transactions.iter().zip(spent_utxos.iter()) {
+    let mut index = 0;
+    for transaction in &body.transactions {
+        let spent_utxos = &spent_utxos[index..transaction.inputs.len()];
+        index += transaction.inputs.len();
         fees += validate_transaction(spent_utxos, transaction)?;
     }
     let coinbase_value = body.get_coinbase_value();
@@ -75,10 +77,16 @@ pub trait State<C> {
     type Error;
     fn validate_transaction(
         &self,
-        spent_outputs: &[Output<C>],
+        spent_utxos: &[Output<C>],
         transaction: &Transaction<C>,
     ) -> Result<(), Self::Error>;
-    fn connect_outputs(&mut self, outputs: &[Output<C>]) -> Result<(), Self::Error>;
+    fn validate_body<A>(
+        &self,
+        spent_utxos: &[Output<C>],
+        block_number: u32,
+        body: &Body<A, C>,
+    ) -> Result<(), Self::Error>;
+    fn connect_body<A>(&mut self, block_number: u32, body: &Body<A, C>) -> Result<(), Self::Error>;
 }
 
 #[derive(Debug, thiserror::Error)]
