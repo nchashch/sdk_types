@@ -1,9 +1,7 @@
-use blake2::Digest;
+const BLAKE3_LENGTH: usize = 32;
+pub type Hash = [u8; BLAKE3_LENGTH];
 
-const BLAKE2_LENGTH: usize = 32;
-pub type Hash = [u8; BLAKE2_LENGTH];
-
-#[derive(Clone, Copy, Eq, PartialEq, Hash, serde::Serialize, serde::Deserialize)]
+#[derive(Default, Clone, Copy, Eq, PartialEq, Hash, serde::Serialize, serde::Deserialize)]
 pub struct BlockHash(Hash);
 
 impl From<Hash> for BlockHash {
@@ -24,7 +22,7 @@ impl std::fmt::Debug for BlockHash {
     }
 }
 
-#[derive(Clone, Copy, Eq, PartialEq, Hash, serde::Serialize, serde::Deserialize)]
+#[derive(Default, Clone, Copy, Eq, PartialEq, Hash, serde::Serialize, serde::Deserialize)]
 pub struct MerkleRoot(Hash);
 
 impl From<Hash> for MerkleRoot {
@@ -51,7 +49,7 @@ impl std::fmt::Debug for MerkleRoot {
     }
 }
 
-#[derive(Clone, Copy, Eq, PartialEq, Hash, serde::Serialize, serde::Deserialize)]
+#[derive(Default, Clone, Copy, Eq, PartialEq, Hash, serde::Serialize, serde::Deserialize)]
 pub struct Txid(pub Hash);
 
 impl Txid {
@@ -91,9 +89,7 @@ impl std::fmt::Debug for Txid {
 }
 
 pub fn hash<T: serde::Serialize>(data: &T) -> Hash {
-    let mut hasher = blake2::Blake2b::<digest::consts::U32>::new();
     let data_serialized =
         bincode::serialize(data).expect("failed to serialize a type to compute a hash");
-    hasher.update(data_serialized);
-    hasher.finalize().into()
+    blake3::hash(&data_serialized).into()
 }

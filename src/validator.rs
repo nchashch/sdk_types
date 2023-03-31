@@ -77,20 +77,9 @@ pub fn validate_body<A: GetAddress, C: GetValue + Clone + Serialize>(
 
 pub trait State<C> {
     type Error;
-    fn validate_transaction(
-        &self,
-        spent_utxos: &[Output<C>],
-        // A transaction's validity may depend on block_number.
-        block_number: u32,
-        transaction: &Transaction<C>,
-    ) -> Result<(), Self::Error>;
-    fn validate_body<A>(
-        &self,
-        spent_utxos: &[Output<C>],
-        block_number: u32,
-        body: &Body<A, C>,
-    ) -> Result<(), Self::Error>;
-    fn connect_body<A>(&mut self, block_number: u32, body: &Body<A, C>) -> Result<(), Self::Error>;
+    fn validate_transaction(&self, transaction: &Transaction<C>) -> Result<(), Self::Error>;
+    fn validate_body<A>(&self, body: &Body<A, C>) -> Result<(), Self::Error>;
+    fn connect_body<A>(&mut self, body: &Body<A, C>) -> Result<(), Self::Error>;
 }
 
 #[derive(Debug, thiserror::Error)]
