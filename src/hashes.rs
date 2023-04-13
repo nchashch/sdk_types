@@ -1,3 +1,5 @@
+use bitcoin::hashes::Hash as _;
+
 const BLAKE3_LENGTH: usize = 32;
 pub type Hash = [u8; BLAKE3_LENGTH];
 
@@ -7,6 +9,19 @@ pub struct BlockHash(Hash);
 impl From<Hash> for BlockHash {
     fn from(other: Hash) -> Self {
         Self(other)
+    }
+}
+
+impl From<BlockHash> for Hash {
+    fn from(other: BlockHash) -> Self {
+        other.0
+    }
+}
+
+impl From<BlockHash> for bitcoin::BlockHash {
+    fn from(other: BlockHash) -> Self {
+        let inner: [u8; 32] = other.into();
+        Self::from_inner(inner)
     }
 }
 

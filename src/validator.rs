@@ -84,6 +84,8 @@ pub trait State<C> {
 
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
+    #[error("utxo with outpoint {outpoint} does not exist")]
+    UtxoDoesNotExist { outpoint: OutPoint },
     #[error("outpoint {input} is double spent")]
     DoubleSpent { input: OutPoint },
     #[error("coinbase value > fees value: {coinbase_value} > {fees}")]

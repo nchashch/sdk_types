@@ -44,7 +44,7 @@ impl<C> Content<C> {
     pub fn is_custom(&self) -> bool {
         matches!(self, Self::Custom(_))
     }
-    pub fn is_regular(&self) -> bool {
+    pub fn is_value(&self) -> bool {
         matches!(self, Self::Value(_))
     }
     pub fn is_withdrawal(&self) -> bool {
