@@ -169,3 +169,9 @@ pub trait GetAddress {
 pub trait GetValue {
     fn get_value(&self) -> u64;
 }
+
+impl GetValue for () {
+    fn get_value(&self) -> u64 {
+        0
+    }
+}
