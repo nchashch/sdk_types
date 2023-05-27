@@ -90,8 +90,15 @@ impl<C: Serialize> Transaction<C> {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct FilledTransaction<C> {
+    pub transaction: Transaction<C>,
+    pub spent_utxos: Vec<Output<C>>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AuthorizedTransaction<A, C> {
     pub transaction: Transaction<C>,
+    /// Authorization is called witness in Bitcoin.
     pub authorizations: Vec<A>,
 }
 
