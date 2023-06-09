@@ -4,7 +4,7 @@ const BLAKE3_LENGTH: usize = 32;
 pub type Hash = [u8; BLAKE3_LENGTH];
 
 #[derive(Default, Clone, Copy, Eq, PartialEq, Hash, serde::Serialize, serde::Deserialize)]
-pub struct BlockHash(Hash);
+pub struct BlockHash(pub Hash);
 
 impl From<Hash> for BlockHash {
     fn from(other: Hash) -> Self {
@@ -15,6 +15,12 @@ impl From<Hash> for BlockHash {
 impl From<BlockHash> for Hash {
     fn from(other: BlockHash) -> Self {
         other.0
+    }
+}
+
+impl From<BlockHash> for Vec<u8> {
+    fn from(other: BlockHash) -> Self {
+        other.0.into()
     }
 }
 
